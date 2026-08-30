@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -116,7 +117,7 @@ type DecisionFilter struct {
 }
 
 func (s *SQLite) ListDecisions(ctx context.Context, f DecisionFilter) ([]domain.MessageDecision, error) {
-	query := `SELECT id,account_id,uid_validity,uid,message_id_hash,origin_folder,current_folder,sender,subject,score,status,evidence_json,model_version,idempotency_key,received_at,created_at,reviewed_at FROM decisions WHERE 1=1`
+	query := `SELECT ` + decisionColumns + ` FROM decisions WHERE 1=1`
 	args := []any{}
 	if f.Status != "" {
 		query += " AND status=?"
@@ -147,22 +148,63 @@ func (s *SQLite) ListDecisions(ctx context.Context, f DecisionFilter) ([]domain.
 	defer rows.Close()
 	var list []domain.MessageDecision
 	for rows.Next() {
-		var d domain.MessageDecision
-		var evidence, received, created string
-		var reviewed sql.NullString
-		if err := rows.Scan(&d.ID, &d.AccountID, &d.UIDValidity, &d.UID, &d.MessageIDHash, &d.OriginFolder, &d.CurrentFolder, &d.From, &d.Subject, &d.Score, &d.Status, &evidence, &d.ModelVersion, &d.IdempotencyKey, &received, &created, &reviewed); err != nil {
+		decision, err := scanDecision(rows)
+		if err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(evidence), &d.Evidence)
-		d.ReceivedAt, _ = time.Parse(time.RFC3339Nano, received)
-		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		if reviewed.Valid {
-			parsed, _ := time.Parse(time.RFC3339Nano, reviewed.String)
-			d.ReviewedAt = &parsed
-		}
-		list = append(list, d)
+		list = append(list, decision)
 	}
 	return list, rows.Err()
+}
+
+const decisionColumns = `id,account_id,uid_validity,uid,message_id_hash,origin_folder,current_folder,sender,subject,score,status,evidence_json,model_version,idempotency_key,received_at,created_at,reviewed_at,trained_at`
+
+// DecisionsByIDs returns the decisions with the given IDs, if any.
+func (s *SQLite) DecisionsByIDs(ctx context.Context, ids []string) ([]domain.MessageDecision, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	query := "SELECT " + decisionColumns + " FROM decisions WHERE id IN (" + placeholders + ")"
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []domain.MessageDecision
+	for rows.Next() {
+		decision, err := scanDecision(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, decision)
+	}
+	return list, rows.Err()
+}
+
+func scanDecision(rows *sql.Rows) (domain.MessageDecision, error) {
+	var d domain.MessageDecision
+	var evidence, received, created string
+	var reviewed, trained sql.NullString
+	if err := rows.Scan(&d.ID, &d.AccountID, &d.UIDValidity, &d.UID, &d.MessageIDHash, &d.OriginFolder, &d.CurrentFolder, &d.From, &d.Subject, &d.Score, &d.Status, &evidence, &d.ModelVersion, &d.IdempotencyKey, &received, &created, &reviewed, &trained); err != nil {
+		return domain.MessageDecision{}, err
+	}
+	_ = json.Unmarshal([]byte(evidence), &d.Evidence)
+	d.ReceivedAt, _ = time.Parse(time.RFC3339Nano, received)
+	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	if reviewed.Valid {
+		parsed, _ := time.Parse(time.RFC3339Nano, reviewed.String)
+		d.ReviewedAt = &parsed
+	}
+	if trained.Valid {
+		parsed, _ := time.Parse(time.RFC3339Nano, trained.String)
+		d.TrainedAt = &parsed
+	}
+	return d, nil
 }
 
 func (s *SQLite) ApplyReview(ctx context.Context, req domain.ReviewRequest) error {
@@ -239,8 +281,20 @@ func (s *SQLite) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 }
 
 func (s *SQLite) PurgeReadableMetadata(ctx context.Context, before time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE decisions SET sender='[entfernt]',subject='[entfernt]' WHERE created_at<? AND sender<>'[entfernt]'`, formatTime(before))
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	boundary := formatTime(before)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM decision_features WHERE decision_id IN (SELECT id FROM decisions WHERE created_at<?)", boundary); err != nil {
+		return 0, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE decisions SET sender='[entfernt]',subject='[entfernt]' WHERE created_at<? AND sender<>'[entfernt]'`, boundary)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()

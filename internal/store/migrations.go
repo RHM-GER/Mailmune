@@ -81,10 +81,41 @@ var migrations = []migration{
   finished_at TEXT,
   error TEXT NOT NULL DEFAULT ''
  )`,
- 			`CREATE INDEX IF NOT EXISTS idx_scan_runs_account ON scan_runs(account_id, started_at DESC)`,
- 		},
- 	},
- }
+			`CREATE INDEX IF NOT EXISTS idx_scan_runs_account ON scan_runs(account_id, started_at DESC)`,
+		},
+	},
+	{
+		id:   3,
+		name: "learning",
+		stmts: []string{
+			// Per-account token counts of the local statistical learner.
+			// Training data comes exclusively from human-confirmed reviews.
+			`CREATE TABLE IF NOT EXISTS learning_features (
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+ token TEXT NOT NULL,
+ spam_count INTEGER NOT NULL DEFAULT 0,
+ ham_count INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(account_id, token)
+)`,
+			`CREATE TABLE IF NOT EXISTS learning_meta (
+ account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+ version INTEGER NOT NULL DEFAULT 1,
+ spam_messages INTEGER NOT NULL DEFAULT 0,
+ ham_messages INTEGER NOT NULL DEFAULT 0,
+ updated_at TEXT NOT NULL
+)`,
+			// Compact feature vectors of pending decisions; deleted once the
+			// decision was used for training and purged after 180 days.
+			// They never contain full message texts.
+			`CREATE TABLE IF NOT EXISTS decision_features (
+ decision_id TEXT PRIMARY KEY REFERENCES decisions(id) ON DELETE CASCADE,
+ features_json TEXT NOT NULL,
+ created_at TEXT NOT NULL
+)`,
+			`ALTER TABLE decisions ADD COLUMN trained_at TEXT`,
+		},
+	},
+}
 
 func (s *SQLite) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (

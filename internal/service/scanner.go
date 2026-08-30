@@ -15,6 +15,7 @@ import (
 	"github.com/RHM-GER/Mailmune/internal/classifier"
 	"github.com/RHM-GER/Mailmune/internal/domain"
 	"github.com/RHM-GER/Mailmune/internal/events"
+	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/mailbox"
 	"github.com/RHM-GER/Mailmune/internal/provider"
 	"github.com/RHM-GER/Mailmune/internal/secrets"
@@ -53,6 +54,11 @@ type ScanEvent struct {
 	Moved      int            `json:"moved,omitempty"`
 	Warnings   []string       `json:"warnings,omitempty"`
 }
+
+// minLearningSamples is the minimum number of confirmed examples before the
+// statistical learner may contribute evidence. Small models stay silent so
+// they cannot push cases over thresholds prematurely.
+const minLearningSamples = 20
 
 func newScanner(db *store.SQLite, secretStore secrets.Store, client *mailbox.Client, rules *classifier.Rules, ollama *provider.Ollama, hub *events.Hub) *Scanner {
 	return &Scanner{store: db, secrets: secretStore, mailbox: client, rules: rules, ollama: ollama, hub: hub, active: map[string]*activeRun{}}
@@ -194,11 +200,19 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		opts.Since = time.Now().AddDate(0, 0, -90)
 	}
 
+	// Load the per-account statistical learner once per run. A missing or
+	// broken model never blocks scanning.
+	var scorer classifier.StatisticalScorer
+	if model, loadErr := s.store.LoadLearningModel(ctx, account.ID); loadErr == nil && model != nil && model.Trained() >= minLearningSamples {
+		scorer = model
+	}
+
 	handler := func(message domain.MessageFeatures, text string) error {
 		if s.testGate != nil {
 			s.testGate()
 		}
-		classification := s.rules.Classify(message, account.Profile)
+		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
+		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
 		s.consultModel(ctx, account, message, &classification)
 		action := classifier.Decide(account.SafetyMode, classification)
 		if action == classifier.ActionIgnore {
@@ -230,6 +244,12 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			ReceivedAt: message.ReceivedAt, CreatedAt: time.Now().UTC(),
 		}
 		if err := s.store.SaveDecision(context.Background(), decision); err != nil {
+			return err
+		}
+		// Keep the compact feature vector so a confirmed review can train the
+		// local model later. It is deleted after training or purged after 180
+		// days; it never contains raw message text.
+		if err := s.store.SaveDecisionFeatures(context.Background(), decision.ID, features); err != nil {
 			return err
 		}
 		result.processed++

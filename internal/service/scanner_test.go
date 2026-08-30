@@ -11,6 +11,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
+	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/mailbox"
 	"github.com/RHM-GER/Mailmune/internal/mailbox/imaptest"
 	"github.com/RHM-GER/Mailmune/internal/secrets"
@@ -241,6 +242,105 @@ func TestScanCancelAndResume(t *testing.T) {
 	state, _, _ = db.FolderSyncState(context.Background(), account.ID, "INBOX")
 	if state.LastUID != 3 {
 		t.Fatalf("last UID after resume = %d, want 3", state.LastUID)
+	}
+}
+
+func TestReviewTrainsLearnerFromConfirmedDecisions(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-learn")
+
+	spamDecision := domain.MessageDecision{
+		ID: "learn-spam", AccountID: account.ID, UIDValidity: 1, UID: 10, MessageIDHash: "h1",
+		OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "spam@lotterie.example", Subject: "Gewinn",
+		Score: 0.8, Status: domain.StatusPending, IdempotencyKey: "learn:1",
+		ReceivedAt: time.Now(), CreatedAt: time.Now(),
+	}
+	hamDecision := domain.MessageDecision{
+		ID: "learn-ham", AccountID: account.ID, UIDValidity: 1, UID: 11, MessageIDHash: "h2",
+		OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "kollege@firma.example", Subject: "Meeting",
+		Score: 0.62, Status: domain.StatusPending, IdempotencyKey: "learn:2",
+		ReceivedAt: time.Now(), CreatedAt: time.Now(),
+	}
+	for _, decision := range []domain.MessageDecision{spamDecision, hamDecision} {
+		if err := db.SaveDecision(context.Background(), decision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SaveDecisionFeatures(context.Background(), spamDecision.ID, map[string]int{"lotteriegewinn": 3, "dom:lotterie.example": 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveDecisionFeatures(context.Background(), hamDecision.ID, map[string]int{"projektbericht": 3, "dom:firma.example": 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Review(context.Background(), domain.ReviewRequest{DecisionIDs: []string{spamDecision.ID}, Action: domain.ReviewConfirm, IdempotencyKey: "rev-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Review(context.Background(), domain.ReviewRequest{DecisionIDs: []string{hamDecision.ID}, Action: domain.ReviewReject, IdempotencyKey: "rev-2"}); err != nil {
+		t.Fatal(err)
+	}
+	model, err := db.LoadLearningModel(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.SpamMessages != 1 || model.HamMessages != 1 {
+		t.Fatalf("learner not trained: %+v", model)
+	}
+
+	// A repeated review must not train the same decision twice.
+	if err := svc.Review(context.Background(), domain.ReviewRequest{DecisionIDs: []string{spamDecision.ID}, Action: domain.ReviewConfirm, IdempotencyKey: "rev-3"}); err != nil {
+		t.Fatal(err)
+	}
+	model, _ = db.LoadLearningModel(context.Background(), account.ID)
+	if model.SpamMessages != 1 {
+		t.Fatalf("decision trained twice: %+v", model)
+	}
+	if _, ok, _ := db.DecisionFeatures(context.Background(), spamDecision.ID); ok {
+		t.Fatal("trained features must be deleted")
+	}
+}
+
+func TestScanUsesTrainedLearner(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-scan-learn")
+
+	// Pre-train a balanced model directly, as confirmed reviews would.
+	model := learning.NewModel()
+	for i := 0; i < 12; i++ {
+		model.Train(map[string]int{"lotteriegewinn": 3, "bonusjagd": 2, "dom:lotterie.example": 2}, learning.ClassSpam)
+		model.Train(map[string]int{"projektbericht": 3, "wochenplan": 2, "dom:firma.example": 2}, learning.ClassHam)
+	}
+	if err := db.SaveLearningModel(context.Background(), account.ID, model); err != nil {
+		t.Fatal(err)
+	}
+
+	// Spam-shaped message whose deterministic signals reach the review list;
+	// the trained learner must add its own evidence group.
+	server.AddMessage("INBOX", "unbekannt@lotterie.example", "Gewinn: sofort handeln",
+		"lotteriegewinn bonusjagd jetzt anmelden",
+		time.Now(), "Authentication-Results: mx.test; spf=fail")
+
+	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("run status = %s (%s)", run.Status, run.Error)
+	}
+	decisions, err := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if err != nil || len(decisions) != 1 {
+		t.Fatalf("decisions = %d, want 1 (err=%v)", len(decisions), err)
+	}
+	found := false
+	for _, evidence := range decisions[0].Evidence {
+		if evidence.Code == "statistical_spam" && evidence.Group == "statistical" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("statistical evidence missing: %+v", decisions[0].Evidence)
 	}
 }
 

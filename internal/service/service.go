@@ -11,6 +11,7 @@ import (
 	"github.com/RHM-GER/Mailmune/internal/classifier"
 	"github.com/RHM-GER/Mailmune/internal/domain"
 	"github.com/RHM-GER/Mailmune/internal/events"
+	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/mailbox"
 	"github.com/RHM-GER/Mailmune/internal/provider"
 	"github.com/RHM-GER/Mailmune/internal/secrets"
@@ -177,7 +178,58 @@ func (s *Service) Decisions(ctx context.Context, filter store.DecisionFilter) ([
 }
 
 func (s *Service) Review(ctx context.Context, request domain.ReviewRequest) error {
-	return s.store.ApplyReview(ctx, request)
+	if err := s.store.ApplyReview(ctx, request); err != nil {
+		return err
+	}
+	if request.Action == domain.ReviewConfirm || request.Action == domain.ReviewReject {
+		s.trainFromReview(ctx, request)
+	}
+	return nil
+}
+
+// trainFromReview folds confirmed/rejected decisions into the per-account
+// statistical learner. Only decisions that were never trained before are
+// used, which keeps retries and restarts idempotent. Training failures never
+// break the review itself.
+func (s *Service) trainFromReview(ctx context.Context, request domain.ReviewRequest) {
+	class := learning.ClassSpam
+	if request.Action == domain.ReviewReject {
+		class = learning.ClassHam
+	}
+	decisions, err := s.store.DecisionsByIDs(ctx, request.DecisionIDs)
+	if err != nil {
+		return
+	}
+	models := map[string]*learning.Model{}
+	dirty := map[string]bool{}
+	for _, decision := range decisions {
+		if decision.TrainedAt != nil {
+			continue
+		}
+		features, ok, err := s.store.DecisionFeatures(ctx, decision.ID)
+		if err != nil || !ok || len(features) == 0 {
+			continue
+		}
+		model, exists := models[decision.AccountID]
+		if !exists {
+			loaded, err := s.store.LoadLearningModel(ctx, decision.AccountID)
+			if err != nil {
+				continue
+			}
+			model = loaded
+			models[decision.AccountID] = model
+		}
+		model.Train(features, class)
+		if err := s.store.MarkDecisionTrained(ctx, decision.ID); err != nil {
+			continue
+		}
+		dirty[decision.AccountID] = true
+	}
+	for accountID := range dirty {
+		if err := s.store.SaveLearningModel(ctx, accountID, models[accountID]); err != nil {
+			delete(dirty, accountID)
+		}
+	}
 }
 
 func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) {

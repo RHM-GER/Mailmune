@@ -48,6 +48,9 @@ type MailboxProfile struct {
 	ExpectedMailTypes   []string `json:"expectedMailTypes"`
 	TrustedDomains      []string `json:"trustedDomains"`
 	TrustedSenders      []string `json:"trustedSenders"`
+	DeniedSenders       []string `json:"deniedSenders"`
+	DeniedDomains       []string `json:"deniedDomains"`
+	DeniedKeywords      []string `json:"deniedKeywords"`
 	WantedNewsletters   []string `json:"wantedNewsletters"`
 	LegitimateAutomated []string `json:"legitimateAutomated"`
 }
@@ -109,10 +112,11 @@ type MessageDecision struct {
 	Status         DecisionStatus `json:"status"`
 	Evidence       []Evidence     `json:"evidence"`
 	ModelVersion   string         `json:"modelVersion,omitempty"`
-	IdempotencyKey string         `json:"idempotencyKey"`
-	ReceivedAt     time.Time      `json:"receivedAt"`
-	CreatedAt      time.Time      `json:"createdAt"`
-	ReviewedAt     *time.Time     `json:"reviewedAt,omitempty"`
+	IdempotencyKey string       `json:"idempotencyKey"`
+	ReceivedAt     time.Time    `json:"receivedAt"`
+	CreatedAt      time.Time    `json:"createdAt"`
+	ReviewedAt     *time.Time   `json:"reviewedAt,omitempty"`
+	TrainedAt      *time.Time   `json:"trainedAt,omitempty"`
 }
 
 type ReviewAction string

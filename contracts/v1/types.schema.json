@@ -38,6 +38,9 @@
         "expectedMailTypes": { "type": "array", "items": { "type": "string" } },
         "trustedDomains": { "type": "array", "items": { "type": "string" } },
         "trustedSenders": { "type": "array", "items": { "type": "string" } },
+        "deniedSenders": { "type": "array", "items": { "type": "string" } },
+        "deniedDomains": { "type": "array", "items": { "type": "string" } },
+        "deniedKeywords": { "type": "array", "items": { "type": "string" } },
         "wantedNewsletters": { "type": "array", "items": { "type": "string" } },
         "legitimateAutomated": { "type": "array", "items": { "type": "string" } }
       },
