@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, demoDecisions, demoSummary, isTauri } from "@/lib/api"
+import { agentRequest, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, scanRuns, startScan } from "@/lib/api"
 import type { Account, Decision, SafetyMode, Summary } from "@/lib/api"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
@@ -92,10 +92,12 @@ export default function App() {
   const mainScrollRef = useRef<HTMLDivElement>(null)
   const mainFade = useScrollFade(mainScrollRef)
   const [page, setPage] = useState<Page>("dashboard")
-  const [summary, setSummary] = useState<Summary>(demoSummary)
-  const [decisions, setDecisions] = useState<Decision[]>(demoDecisions)
+  // Demo-Daten laufen nur in der Browser-Vorschau ohne Agent. In der
+  // Desktop-App beginnt die Ansicht leer und füllt sich aus echten Daten.
+  const [summary, setSummary] = useState<Summary>(isTauri() ? emptySummary : demoSummary)
+  const [decisions, setDecisions] = useState<Decision[]>(isTauri() ? [] : demoDecisions)
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [, setAgentOnline] = useState(false)
+  const [agentOnline, setAgentOnline] = useState(!isTauri())
   const [compactNav, setCompactNav] = useState(false)
   const narrowApp = useMediaQuery("(max-width: 890px)")
   const effectiveCompactNav = narrowApp || compactNav
@@ -118,11 +120,22 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!isTauri()) return
     const initial = window.setTimeout(() => void refresh(), 0)
-    const retry = isTauri() ? window.setTimeout(() => void refresh(), 1200) : undefined
+    const retry = window.setTimeout(() => void refresh(), 1200)
+    const poll = window.setInterval(() => void refresh(), 15000)
+    let stopEvents: (() => void) | undefined
+    let disposed = false
+    void listenAgentEvents(() => void refresh()).then((stop) => {
+      if (disposed) stop()
+      else stopEvents = stop
+    })
     return () => {
+      disposed = true
       window.clearTimeout(initial)
-      if (retry !== undefined) window.clearTimeout(retry)
+      window.clearTimeout(retry)
+      window.clearInterval(poll)
+      stopEvents?.()
     }
   }, [])
 
@@ -134,8 +147,8 @@ export default function App() {
           <div ref={mainScrollRef} className="h-full overflow-y-auto">
           {page === "settings" && <Header page={page} />}
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
-            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} />}
-            {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} />}
+            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} />}
+            {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
             {page === "notifications" && <Notifications scrollRef={mainScrollRef} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} />}
           </div>
@@ -197,7 +210,7 @@ function Header({ page }: { page: Page }) {
   </header>
 }
 
-function Dashboard({ summary, onReview, scrollRef }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null> }) {
+function Dashboard({ summary, onReview, scrollRef, agentOnline }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean }) {
   const [period, setPeriod] = useState("Woche")
   const [showInbox, setShowInbox] = useState(true)
   const [showFalsePositives, setShowFalsePositives] = useState(true)
@@ -205,6 +218,8 @@ function Dashboard({ summary, onReview, scrollRef }: { summary: Summary; onRevie
   const totals = activeChartData.reduce((sum, item) => ({ spam: sum.spam + item.spam, inbox: sum.inbox + item.inbox, falsePositive: sum.falsePositive + item.falsePositive }), { spam: 0, inbox: 0, falsePositive: 0 })
   const spamShare = Math.round((totals.spam / (totals.spam + totals.inbox)) * 100)
   return <div className="dashboard-cards space-y-6">
+    {isTauri() && !agentOnline && <p role="status" className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-xs text-[#999]">Der lokale Agent ist noch nicht erreichbar. Sobald er läuft, erscheinen hier echte Daten.</p>}
+    {isTauri() && agentOnline && summary.accounts === 0 && <p role="status" className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-xs text-[#999]">Noch kein Postfach verbunden. Füge in den Einstellungen ein Postfach hinzu, um den lesenden Trockenlauf zu starten.</p>}
     <div data-section-id="dashboard-summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric label="Spam zugeordnet" value={summary.moved + summary.confirmed} note="Diese Woche" />
       <Metric label="Noch zu prüfen" value={summary.pending} note="Menschliche Entscheidung" onClick={onReview} />
@@ -227,7 +242,7 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
   return <div className="flex rounded-lg border border-white/[0.07] bg-[#242424] p-1">{options.map((option) => <button key={option} onClick={() => onChange(option)} className={`rounded-md px-2.5 py-1.5 text-xs ${value === option ? "bg-[#171717] text-white" : "text-[#777] hover:text-white"}`}>{option}</button>)}</div>
 }
 
-function ReviewPage({ decisions, refresh }: { decisions: Decision[]; refresh: () => void }) {
+function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean }) {
   const tableScrollRef = useRef<HTMLDivElement>(null)
   const tableFade = useScrollFade(tableScrollRef)
   const tableHorizontalFade = useScrollFade(tableScrollRef, "horizontal")
@@ -289,10 +304,10 @@ function ReviewPage({ decisions, refresh }: { decisions: Decision[]; refresh: ()
               <TableCell className={`px-4 font-mono text-xs transition-colors ${shortDivider}`} style={{ color: scoreColor(item.score) }}>{Math.round(item.score * 100)} %</TableCell>
               <TableCell className={`truncate px-4 text-xs text-[#888] ${shortDivider}`}>{spamCategory(item)}</TableCell>
               <TableCell className={`px-4 ${shortDivider}`}><p className="truncate text-sm">{item.subject}</p><p className="mt-1 truncate text-xs text-[#666]">{item.evidence.map((entry) => entry.summary).join(" · ")}</p></TableCell>
-              <TableCell className={`whitespace-nowrap px-4 text-xs text-[#888] ${shortDivider}`}>{new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.receivedAt))}</TableCell>
+              <TableCell className="whitespace-nowrap px-4 text-xs text-[#888] ${shortDivider}`}>{new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.receivedAt))}</TableCell>
               <TableCell className="px-4"><StatusBadge status={item.status} /></TableCell>
             </TableRow>
-          })}{filtered.length === 0 && <TableRow><TableCell colSpan={7} className="h-40 text-center text-sm text-[#666]">Keine Nachrichten für diese Ansicht.</TableCell></TableRow>}</TableBody>
+          })}{filtered.length === 0 && <TableRow><TableCell colSpan={7} className="h-40 text-center text-sm text-[#666]">{isTauri() && !agentOnline ? "Der lokale Agent ist noch nicht erreichbar." : "Keine Nachrichten für diese Ansicht."}</TableCell></TableRow>}</TableBody>
             </Table>
           </div>
         </div>
@@ -459,15 +474,36 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
   const runAccountAction = async (account: Account, action: "test" | "scan") => {
-    setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : "Trockenlauf wird ausgeführt …" }))
+    setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : "Trockenlauf wird gestartet …" }))
     try {
       if (action === "test") {
         const result = await agentRequest<{ supportsIdle: boolean; supportsMove: boolean; folders: string[] }>("POST", `/v1/accounts/${account.id}/test`)
         setAccountStatus((current) => ({ ...current, [account.id]: `Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}` }))
       } else {
-        const result = await agentRequest<{ processed: number; candidates: number; moved: number; dryRun: boolean }>("POST", `/v1/accounts/${account.id}/scan`)
-        setAccountStatus((current) => ({ ...current, [account.id]: `${result.processed} Nachrichten gelesen · ${result.candidates} Prüffälle · nichts verschoben` }))
-        await refresh()
+        const run = await startScan(account.id)
+        // Der Lauf arbeitet im Agent-Hintergrund; die UI folgt dem
+        // Fortschritt über den Scan-Status und den Eventstream.
+        for (let attempt = 0; attempt < 300; attempt++) {
+          const runs = await scanRuns(account.id)
+          const current = runs.find((item) => item.id === run.id) ?? runs[0]
+          if (!current) break
+          if (current.status === "running") {
+            setAccountStatus((state) => ({ ...state, [account.id]: current.estimatedTotal > 0 ? `${current.processed} von etwa ${current.estimatedTotal} Nachrichten gelesen …` : `${current.processed} Nachrichten gelesen …` }))
+          } else if (current.status === "completed") {
+            setAccountStatus((state) => ({ ...state, [account.id]: `Abgeschlossen · ${current.processed} Nachrichten gelesen · keine automatische Verschiebung` }))
+            await refresh()
+            return
+          } else if (current.status === "cancelled") {
+            setAccountStatus((state) => ({ ...state, [account.id]: "Trockenlauf abgebrochen." }))
+            await refresh()
+            return
+          } else {
+            setAccountStatus((state) => ({ ...state, [account.id]: `Fehlgeschlagen: ${current.error || "unbekannter Fehler"}` }))
+            return
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+        }
+        setAccountStatus((current) => ({ ...current, [account.id]: "Prüfung läuft weiter – der Fortschritt erscheint im Ereignisstrom." }))
       }
     } catch (error) {
       setAccountStatus((current) => ({ ...current, [account.id]: error instanceof Error ? error.message : "Aktion fehlgeschlagen" }))
@@ -610,7 +646,7 @@ function AddAccount({ refresh }: { refresh: () => void }) {
   const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "" })
   const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); try { await agentRequest("POST", "/v1/accounts", { account: { name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: [form.purpose, form.context].filter(Boolean).join(" · "), industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh() } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
+  const save = async () => { setSaving(true); setError(""); try { await agentRequest("POST", "/v1/accounts", { account: { id: crypto.randomUUID(), name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: [form.purpose, form.context].filter(Boolean).join(" · "), industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh() } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}><DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} /><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}

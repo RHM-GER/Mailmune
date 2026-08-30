@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 
 export type SafetyMode = "confirm_all" | "safe" | "aggressive"
 export type DecisionStatus = "pending" | "moved" | "confirmed" | "rejected" | "deferred"
+export type ScanStatus = "running" | "completed" | "cancelled" | "failed" | "interrupted"
 
 export interface Evidence {
   group: string
@@ -33,6 +35,32 @@ export interface Summary {
   processedWeek: number
 }
 
+export interface ScanRun {
+  id: string
+  accountId: string
+  status: ScanStatus
+  folder: string
+  processed: number
+  estimatedTotal: number
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  error?: string
+}
+
+export interface ScanEvent {
+  run: ScanRun
+  candidates?: number
+  moved?: number
+  warnings?: string[]
+}
+
+/** Ereignis, wie es der Tauri-Eventstream aus dem Agenten weiterleitet. */
+export interface AgentEvent {
+  type: string
+  data: unknown
+}
+
 export interface Account {
   id: string
   name: string
@@ -55,6 +83,9 @@ export interface Account {
     expectedMailTypes: string[]
     trustedDomains: string[]
     trustedSenders: string[]
+    deniedSenders?: string[]
+    deniedDomains?: string[]
+    deniedKeywords?: string[]
     wantedNewsletters: string[]
     legitimateAutomated: string[]
   }
@@ -69,6 +100,54 @@ export async function agentRequest<T>(method: string, path: string, body?: unkno
   return invoke<T>("agent_request", { method, path, body: body ?? null })
 }
 
+export function startScan(accountId: string): Promise<ScanRun> {
+  return agentRequest<ScanRun>("POST", `/v1/accounts/${accountId}/scans`, {})
+}
+
+export function cancelScan(accountId: string): Promise<ScanRun> {
+  return agentRequest<ScanRun>("POST", `/v1/accounts/${accountId}/scans/cancel`, {})
+}
+
+export function scanRuns(accountId: string): Promise<ScanRun[]> {
+  return agentRequest<ScanRun[]>("GET", `/v1/accounts/${accountId}/scans`)
+}
+
+export function summary(): Promise<Summary> {
+  return agentRequest<Summary>("GET", "/v1/summary")
+}
+
+export function decisions(limit = 250): Promise<Decision[]> {
+  return agentRequest<Decision[]>("GET", `/v1/decisions?limit=${limit}`)
+}
+
+export function accounts(): Promise<Account[]> {
+  return agentRequest<Account[]>("GET", "/v1/accounts")
+}
+
+/**
+ * Abonniert den Agent-Eventstream (Scan-Fortschritt, neue Entscheidungen,
+ * Kontostatus). Liefert eine Funktion zum Abbestellen. Außerhalb der
+ * Desktop-App passiert nichts.
+ */
+export async function listenAgentEvents(onEvent: (event: AgentEvent) => void): Promise<() => void> {
+  if (!isTauri()) return () => {}
+  return listen<AgentEvent>("mailmune://agent-event", (message) => onEvent(message.payload))
+}
+
+export const emptySummary: Summary = {
+  accounts: 0,
+  pending: 0,
+  moved: 0,
+  confirmed: 0,
+  rejected: 0,
+  falsePositiveRate: 0,
+  processedWeek: 0,
+}
+
+/**
+ * Demo-Daten ausschließlich für die Browser-Vorschau ohne Agent. In der
+ * Desktop-App werden sie nicht verwendet; dort liefert der Agent echte Daten.
+ */
 export const demoSummary: Summary = {
   accounts: 1,
   pending: 12,
