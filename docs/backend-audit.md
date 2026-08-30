@@ -84,3 +84,32 @@ Paket `imapserver`, mit dem sich ein kontrollierter lokaler IMAP-Testserver
 ohne neue Abhängigkeit bauen lässt. Der statistische Lernfilter wird als
 kleiner Naive-Bayes-Lerner ohne externe Bibliothek implementiert. Externe
 Blacklists werden weiterhin nicht verwendet.
+
+## Zwischenstand (Branch `qwen/backend-foundation`)
+
+Behoben bzw. umgesetzt:
+
+- Versionierte, vorwärtslaufende Migrationen (`schema_migrations`).
+- UID-Sync-Zustand und Scan-Läufe persistiert; `UIDVALIDITY`-Wechsel löst
+  sicheren Resync aus.
+- Scans laufen im Hintergrund je Konto serialisiert, mit Fortschritt,
+  Abbruch und Wiederaufnahme; `running`-Leichen werden beim Start als
+  `interrupted` markiert.
+- Trockenlauf wird serverseitig für neue Konten erzwungen.
+- SSE-Eventstream liefert `scan.*`- und `account.*`-Ereignisse; Fehler
+  tragen stabile Codes.
+- `defer client.Logout().Wait()`-Defekt (sofortiger LOGOUT-Versand) in allen
+  IMAP-Pfaden behoben; Fetch-Deadlock durch Zwei-Phasen-Abruf behoben;
+  Dial/Handshake sind zeitbegrenzt und abbrechbar.
+- Regelpipeline mit dokumentierten Evidence-Codes, Deny-Listen und lokalem
+  Lernfilter; Ollama nur Loopback, serialisiert, mit Fähigkeitstest.
+
+Weiterhin offen (siehe TODO.md):
+
+- Move-Zustandsmaschine (`move_planned/moving/...`) mit Zielprüfung und
+  Rückverschiebung; bis dahin verschiebt nur die bestehende, MOVE-gebundene
+  Pfadlogik im freigegebenen Nicht-Trockenlauf.
+- IMAP-IDLE, periodischer Abgleich, Standby-Reconnect.
+- Kalibrierungsmetriken und Export/Import des Lernwissens.
+- Rust-SSE-Weiterleiter ist ohne lokale Rust-Toolchain erstellt und muss
+  beim ersten Desktop-Build verifiziert werden.

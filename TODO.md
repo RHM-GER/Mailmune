@@ -6,11 +6,12 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 ### P0 – Nutzbarer Sicherheitskern
 
-- [ ] Native Tauri-App auf Windows 11 vollständig kompilieren und Sidecar-Handshake prüfen
+- [ ] Native Tauri-App auf Windows 11 vollständig kompilieren und Sidecar-Handshake prüfen (inkl. Verifikation des Rust-SSE-Weiterleiters beim ersten Build)
 - [ ] Testkonto sicher speichern, Verbindung testen und ausschließlich lesenden Trockenlauf ausführen
 - [ ] Sichere IMAP-MOVE-Transaktion mit Zielprüfung und Wiederherstellung implementieren
-- [ ] Reviewaktionen erst nach erfolgreichen MOVE-, Wiederholungs- und Absturztests aktivieren
-- [ ] UI und Agent vollständig verbinden; Demo-Daten klar von echten Daten trennen
+- [ ] Reviewaktionen mit Verschiebung erst nach erfolgreichen MOVE-, Wiederholungs- und Absturztests aktivieren
+- [x] UI und Agent verbinden; Demo-Daten klar von echten Daten trennen (Desktop startet leer, Browser-Vorschau mit Demo)
+- [ ] Dashboard-Charts und Benachrichtigungen mit echten Verlaufsdaten verbinden
 
 ### P1 – UI-Konsolidierung
 
@@ -27,20 +28,25 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 ### P0 – IMAP, Sicherheit und Datenhaltung
 
 - [ ] Echter STRATO-Trockenlauf mit mindestens 100 manuell geprüften Entscheidungen
-- [ ] IMAP-IDLE plus zehnminütiger Abgleich, Standby-Reconnect, UIDVALIDITY-Wechsel und idempotente Ereignisse
+- [ ] IMAP-IDLE plus zehnminütiger Abgleich und Standby-Reconnect
+- [x] UID-basierte Synchronisierung mit sicherem Resync bei UIDVALIDITY-Wechsel und idempotenten Entscheidungen
 - [ ] Credential Manager produktiv prüfen; Secret-Service- und Keychain-Adapter vorbereiten
-- [ ] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
-- [ ] Datenbankmigrationen, Backup und Wiederherstellung von Profil- und Lernwissen
+- [x] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
+- [x] Nummerierte vorwärtslaufende Datenbankmigrationen
+- [ ] Backup, Export und Import von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung
 - [ ] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert
 - [ ] Externe Blacklists nur mit Herkunft, Lizenz, Signatur/Hash, Aktualitätsprüfung und Rollback evaluieren
 - [ ] Blacklist-Updates ohne Telemetrie und unabhängig von App-Releases konzipieren
 
 ### P0 – Klassifikation und Lernsystem
 
-- [ ] Deterministischen Regelkern für Header, Korrespondenz, Domains, Links, Mailinglisten und Authentifizierung fertigstellen
-- [ ] Statistischen Lernfilter aus bestätigten Spam- und Fehlalarm-Beispielen implementieren
-- [ ] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden
-- [ ] Fähigkeitstest und reproduzierbaren Modellvergleich für 16-GB-Laptops umsetzen
+- [x] Deterministischen Regelkern für Header, Korrespondenz, Domains, Links, Mailinglisten und Authentifizierung fertigstellen (Stufen-Pipeline mit stabilen Evidence-Codes, Allow-/Deny-Listen)
+- [x] Statistischen Lernfilter aus bestätigten Spam- und Fehlalarm-Beispielen implementieren (lokaler Naive Bayes, Idempotenz, Giftschutz)
+- [ ] Kalibrierungsmetriken (Precision, Recall, False-Positive-Rate) für den Lernfilter messen
+- [ ] Export/Import/Reset des Lernfilters und Evaluierung gegen das dokumentierte MIT-Datenset (nur offline, ohne Auslieferung)
+- [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
+- [x] Fähigkeitstest als feste Proben-Suite umsetzen
+- [ ] Reproduzierbaren Modellvergleich für 16-GB-Laptops umsetzen
 - [ ] Wissen vom Modell entkoppeln: Profil, Regeln, Statistik und Beispiele bleiben modellunabhängig
 - [ ] Modellwechsel mit Re-Benchmark, Schattenbetrieb und Rollback gestalten
 - [ ] Scores unter 60 % nicht in die normale Prüfliste aufnehmen; nur anonymisiert zur Kalibrierung zählen
@@ -133,6 +139,8 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Go-Agent-Grundgerüst mit SQLite, Schlüsselbund, TLS-IMAP-Test und lesendem Trockenlauf
 - [x] Lokale API mit Sitzungstoken, Host-Prüfung und Origin-Sperre
 - [x] Löschendpunkte ausgeschlossen und unsicherer COPY-/EXPUNGE-Fallback gesperrt
+- [x] Hintergrundscans mit Fortschritt, Abbruch, Wiederaufnahme und SSE-Eventstream
+- [x] Kontrollierter lokaler IMAP-Testserver für Integrations- und Absturztests
 
 ### Design
 

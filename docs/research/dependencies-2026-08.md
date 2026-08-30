@@ -51,3 +51,24 @@ Datenschutzprüfung (`TODO.md` P0).
   qwen3:4b bleiben Empfehlung).
 - **Rspamd**: optionaler externer HTTP-Provider, nicht Windows-Pflichtdienst;
   weiterhin nicht priorisiert.
+
+## Externes Evaluierungs-Datenset (Hugging Face)
+
+- Quelle: `locuoco/the-biggest-spam-ham-phish-email-dataset-300000`
+  (https://huggingface.co/datasets/locuoco/the-biggest-spam-ham-phish-email-dataset-300000).
+- Lizenz laut Dataset-Karte: **MIT**; Herkunft dokumentiert als Übernahme des
+  gleichnamigen Kaggle-Datensets (`akshatsharma2`, MIT). Stichtagsprüfung am
+  31.08.2026.
+- Inhalt: ca. 365.000 Zeilen (Label 0=Ham, 1=Phish, 2=Spam), reine Textkörper
+  ohne Header/Absender, englisch, ~631 MB.
+- Bewertung: Als **Offline-Evaluierungsbasis** für Feature-Extraktion und
+  Lernfilter-Metrik (Precision/Recall/FPR) geeignet. Grenzen: keine
+  Header-Informationen (Authentication, Listen, Absenderstrukturen lassen sich
+  damit nicht prüfen), englischsprachig, deutsche Spam-Muster unterrepräsentiert.
+- Auflagen für die Nutzung: Das Dataset wird **nicht** ins Repository
+  übernommen und nicht als Trainingsdatensatz ausgeliefert. Ein späterer
+  Import in den lokalen Lernfilter läuft ausschließlich über den noch zu
+  spezifizierenden, versionierten Profil-/Lerntransfer mit Herkunft, Schema,
+  Version und Konfliktanzeige (siehe BACKEND_HANDOFF Datenbank-Abschnitt).
+  Vor einem produktiven Einsatz ist die Herkunft der Unter-Datensätze
+  (Enron u. a.) datenschutzrechtlich zu bewerten.
