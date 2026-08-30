@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mailmune.local/contracts/v1/types.schema.json",
+  "title": "Mailmune API v1",
+  "type": "object",
+  "$defs": {
+    "Evidence": {
+      "type": "object",
+      "required": ["group", "code", "weight", "summary"],
+      "properties": {
+        "group": { "type": "string" },
+        "code": { "type": "string" },
+        "weight": { "type": "number", "minimum": -1, "maximum": 1 },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "MessageDecision": {
+      "type": "object",
+      "required": ["id", "accountId", "originFolder", "score", "status", "evidence", "receivedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "accountId": { "type": "string" },
+        "originFolder": { "type": "string" },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "status": { "enum": ["pending", "moved", "confirmed", "rejected", "deferred"] },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/Evidence" } },
+        "receivedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

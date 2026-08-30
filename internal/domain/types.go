@@ -1,0 +1,140 @@
+package domain
+
+import "time"
+
+type SafetyMode string
+
+const (
+	SafetyConfirmAll SafetyMode = "confirm_all"
+	SafetySafe       SafetyMode = "safe"
+	SafetyAggressive SafetyMode = "aggressive"
+)
+
+type DecisionStatus string
+
+const (
+	StatusPending   DecisionStatus = "pending"
+	StatusMoved     DecisionStatus = "moved"
+	StatusConfirmed DecisionStatus = "confirmed"
+	StatusRejected  DecisionStatus = "rejected"
+	StatusDeferred  DecisionStatus = "deferred"
+)
+
+type AccountConfig struct {
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Host            string         `json:"host"`
+	Port            int            `json:"port"`
+	Username        string         `json:"username"`
+	SecretRef       string         `json:"secretRef"`
+	InboxFolder     string         `json:"inboxFolder"`
+	SentFolder      string         `json:"sentFolder"`
+	SpamFolder      string         `json:"spamFolder"`
+	SafetyMode      SafetyMode     `json:"safetyMode"`
+	OllamaModel     string         `json:"ollamaModel,omitempty"`
+	OllamaValidated bool           `json:"ollamaValidated"`
+	Enabled         bool           `json:"enabled"`
+	DryRun          bool           `json:"dryRun"`
+	LastScanAt      *time.Time     `json:"lastScanAt,omitempty"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
+	Profile         MailboxProfile `json:"profile"`
+}
+
+type MailboxProfile struct {
+	Purpose             string   `json:"purpose"`
+	Industry            string   `json:"industry"`
+	Languages           []string `json:"languages"`
+	ExpectedMailTypes   []string `json:"expectedMailTypes"`
+	TrustedDomains      []string `json:"trustedDomains"`
+	TrustedSenders      []string `json:"trustedSenders"`
+	WantedNewsletters   []string `json:"wantedNewsletters"`
+	LegitimateAutomated []string `json:"legitimateAutomated"`
+}
+
+type AttachmentMetadata struct {
+	Filename string `json:"filename"`
+	MIMEType string `json:"mimeType"`
+	Size     int64  `json:"size"`
+}
+
+type MessageFeatures struct {
+	AccountID            string               `json:"accountId"`
+	UIDValidity          uint32               `json:"uidValidity"`
+	UID                  uint32               `json:"uid"`
+	Folder               string               `json:"folder"`
+	MessageID            string               `json:"messageId"`
+	From                 string               `json:"from"`
+	FromDomain           string               `json:"fromDomain"`
+	ReplyTo              string               `json:"replyTo"`
+	Subject              string               `json:"subject"`
+	Text                 string               `json:"-"`
+	ReceivedAt           time.Time            `json:"receivedAt"`
+	ListUnsubscribe      bool                 `json:"listUnsubscribe"`
+	AuthenticationPassed bool                 `json:"authenticationPassed"`
+	AuthenticationFailed bool                 `json:"authenticationFailed"`
+	KnownCorrespondent   bool                 `json:"knownCorrespondent"`
+	URLCount             int                  `json:"urlCount"`
+	Attachments          []AttachmentMetadata `json:"attachments"`
+}
+
+type Evidence struct {
+	Group   string  `json:"group"`
+	Code    string  `json:"code"`
+	Weight  float64 `json:"weight"`
+	Summary string  `json:"summary"`
+}
+
+type Classification struct {
+	Score             float64    `json:"score"`
+	Evidence          []Evidence `json:"evidence"`
+	IndependentGroups int        `json:"independentGroups"`
+	StrongTrustSignal bool       `json:"strongTrustSignal"`
+	ModelUsed         string     `json:"modelUsed,omitempty"`
+	ModelValidated    bool       `json:"modelValidated"`
+	RecommendedAction string     `json:"recommendedAction"`
+}
+
+type MessageDecision struct {
+	ID             string         `json:"id"`
+	AccountID      string         `json:"accountId"`
+	UIDValidity    uint32         `json:"uidValidity"`
+	UID            uint32         `json:"uid"`
+	MessageIDHash  string         `json:"messageIdHash"`
+	OriginFolder   string         `json:"originFolder"`
+	CurrentFolder  string         `json:"currentFolder"`
+	From           string         `json:"from"`
+	Subject        string         `json:"subject"`
+	Score          float64        `json:"score"`
+	Status         DecisionStatus `json:"status"`
+	Evidence       []Evidence     `json:"evidence"`
+	ModelVersion   string         `json:"modelVersion,omitempty"`
+	IdempotencyKey string         `json:"idempotencyKey"`
+	ReceivedAt     time.Time      `json:"receivedAt"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	ReviewedAt     *time.Time     `json:"reviewedAt,omitempty"`
+}
+
+type ReviewAction string
+
+const (
+	ReviewConfirm ReviewAction = "confirm"
+	ReviewReject  ReviewAction = "reject"
+	ReviewDefer   ReviewAction = "defer"
+)
+
+type ReviewRequest struct {
+	DecisionIDs    []string     `json:"decisionIds"`
+	Action         ReviewAction `json:"action"`
+	IdempotencyKey string       `json:"idempotencyKey"`
+}
+
+type DashboardSummary struct {
+	Accounts      int     `json:"accounts"`
+	Pending       int     `json:"pending"`
+	Moved         int     `json:"moved"`
+	Confirmed     int     `json:"confirmed"`
+	Rejected      int     `json:"rejected"`
+	FalsePositive float64 `json:"falsePositiveRate"`
+	ProcessedWeek int     `json:"processedWeek"`
+}
