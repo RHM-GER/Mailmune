@@ -75,29 +75,16 @@ type fetchedMessage struct {
 // above the persisted state; a UIDVALIDITY change triggers a bounded
 // re-synchronization from the most recent messages instead of a blind
 // continuation. Flags, folders and message contents are never modified.
+//
+// The call is synchronous: cancellation is checked between messages and the
+// caller (the scanner) already runs it in its own goroutine. Connection and
+// protocol timeouts are enforced by the IMAP client itself.
 func (m *Client) SyncFolder(ctx context.Context, account domain.AccountConfig, password, folder string, prev *domain.FolderSyncState, opts SyncOptions, handler MessageHandler) (*SyncOutcome, error) {
-	type result struct {
-		outcome *SyncOutcome
-		err     error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		outcome, err := m.syncFolder(ctx, account, password, folder, prev, opts, handler)
-		ch <- result{outcome: outcome, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		if prev != nil {
-			return &SyncOutcome{UIDValidity: prev.UIDValidity, LastUID: prev.LastUID}, ctx.Err()
-		}
-		return &SyncOutcome{}, ctx.Err()
-	case value := <-ch:
-		return value.outcome, value.err
-	}
+	return m.syncFolder(ctx, account, password, folder, prev, opts, handler)
 }
 
 func (m *Client) syncFolder(ctx context.Context, account domain.AccountConfig, password, folder string, prev *domain.FolderSyncState, opts SyncOptions, handler MessageHandler) (*SyncOutcome, error) {
-	client, err := m.connect(account, password)
+	client, err := m.connect(ctx, account, password)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +139,14 @@ func (m *Client) syncFolder(ctx context.Context, account domain.AccountConfig, p
 	return m.consumeFetch(ctx, client, cmd, headerSection, resync, opts, account, folder, selected.UIDValidity, outcome, handler)
 }
 
+// consumeFetch processes a FETCH response in two phases. Phase 1 drains the
+// whole metadata response before any further command is issued; phase 2
+// fetches bounded text and classifies message by message. Interleaving a
+// nested FETCH with an undrained streaming response would deadlock the
+// client's single reader goroutine.
 func (m *Client) consumeFetch(ctx context.Context, client *imapclient.Client, cmd *imapclient.FetchCommand, headerSection *imap.FetchItemBodySection, resync bool, opts SyncOptions, account domain.AccountConfig, folder string, uidValidity uint32, outcome *SyncOutcome, handler MessageHandler) (*SyncOutcome, error) {
+	var pending []*fetchedMessage
 	for {
-		if err := ctx.Err(); err != nil {
-			cmd.Close()
-			return outcome, err
-		}
 		message := cmd.Next()
 		if message == nil {
 			break
@@ -169,6 +158,16 @@ func (m *Client) consumeFetch(ctx context.Context, client *imapclient.Client, cm
 		}
 		if fetched.envelope == nil || fetched.uid == 0 {
 			continue
+		}
+		pending = append(pending, fetched)
+	}
+	if err := cmd.Close(); err != nil {
+		return outcome, fmt.Errorf("fetch metadata: %w", err)
+	}
+
+	for _, fetched := range pending {
+		if err := ctx.Err(); err != nil {
+			return outcome, err
 		}
 		// Track every observed UID, including date-filtered ones, so the
 		// next run does not re-fetch them.
@@ -185,16 +184,12 @@ func (m *Client) consumeFetch(ctx context.Context, client *imapclient.Client, cm
 			text = m.fetchText(client, fetched, opts.TextLimit)
 		}
 		if err := handler(features, text); err != nil {
-			cmd.Close()
 			return outcome, err
 		}
 		outcome.Processed++
 		if opts.OnProgress != nil {
 			opts.OnProgress(outcome.Processed, outcome.Total)
 		}
-	}
-	if err := cmd.Close(); err != nil {
-		return outcome, fmt.Errorf("fetch metadata: %w", err)
 	}
 	return outcome, nil
 }
@@ -245,6 +240,11 @@ func readLiteralBounded(reader io.Reader, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) >= limit {
+		// Truncated: the remainder must still be drained, otherwise the
+		// protocol stream stalls waiting for the literal consumer.
+		if _, err := io.Copy(io.Discard, reader); err != nil {
+			return nil, err
+		}
 		return data[:0], nil
 	}
 	return data, nil
@@ -362,7 +362,10 @@ func drainTextFetch(cmd *imapclient.FetchCommand, section *imap.FetchItemBodySec
 			continue
 		}
 		if !value.MatchCommand(section) {
-			_, _ = io.Copy(io.Discard, io.LimitReader(value.Literal, limit+1024))
+			// Drain unexpected sections completely so the stream can proceed.
+			if _, err := io.Copy(io.Discard, value.Literal); err != nil {
+				return ""
+			}
 			continue
 		}
 		data, err := readLiteralBounded(value.Literal, limit+1024)
