@@ -52,6 +52,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("GET /v1/decisions", s.decisions)
 	mux.HandleFunc("POST /v1/reviews", s.review)
 	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("POST /v1/models/capability", s.capabilityTest)
 	mux.HandleFunc("GET /v1/events", s.events)
 	// The event stream must never be cut off by the global write timeout.
 	s.http = &http.Server{Handler: s.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
@@ -163,6 +164,23 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	value, err := s.service.Models(ctx)
 	respond(w, "models_failed", value, err)
+}
+func (s *Server) capabilityTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", errors.New("model is required"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	value, err := s.service.CapabilityTest(ctx, req.Model)
+	respond(w, "capability_test_failed", value, err)
 }
 
 // events streams agent events as server-sent events: scan lifecycle,

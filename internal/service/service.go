@@ -48,12 +48,18 @@ func New(db *store.SQLite, secretStore secrets.Store) *Service {
 // self-signed test CA. Production code uses New.
 func NewWithMailbox(db *store.SQLite, secretStore secrets.Store, client *mailbox.Client) *Service {
 	hub := events.NewHub()
+	ollama, err := provider.NewOllama("")
+	if err != nil {
+		// The default endpoint is loopback; anything else is a configuration
+		// error the agent must not start with.
+		panic(fmt.Errorf("ollama provider: %w", err))
+	}
 	service := &Service{
 		store:   db,
 		secrets: secretStore,
 		mailbox: client,
 		rules:   classifier.NewRules(),
-		ollama:  provider.NewOllama(""),
+		ollama:  ollama,
 		hub:     hub,
 	}
 	service.scanner = newScanner(db, secretStore, client, service.rules, service.ollama, hub)
@@ -237,6 +243,11 @@ func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) 
 }
 
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }
+
+// CapabilityTest runs the fixed capability probe set against a local model.
+func (s *Service) CapabilityTest(ctx context.Context, model string) (provider.CapabilityReport, error) {
+	return s.ollama.RunCapabilityTest(ctx, model)
+}
 
 func (s *Service) Purge(ctx context.Context) (int64, error) {
 	return s.store.PurgeReadableMetadata(ctx, time.Now().AddDate(0, 0, -180))

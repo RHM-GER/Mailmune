@@ -7,7 +7,10 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const serviceName = "InboxSentinel"
+// serviceName is the OS keyring namespace. Changing it orphans previously
+// stored credentials; it was moved from the legacy "InboxSentinel" name
+// before the first productive account existed.
+const serviceName = "Mailmune"
 
 var ErrNotFound = errors.New("secret not found")
 
