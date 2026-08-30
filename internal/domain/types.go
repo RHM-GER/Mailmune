@@ -138,3 +138,37 @@ type DashboardSummary struct {
 	FalsePositive float64 `json:"falsePositiveRate"`
 	ProcessedWeek int     `json:"processedWeek"`
 }
+
+// FolderSyncState is the persisted UID synchronization state of one folder.
+// A change of UIDVALIDITY invalidates every stored UID and requires a safe
+// re-sync from UID 1; blind continuation is forbidden.
+type FolderSyncState struct {
+	AccountID   string    `json:"accountId"`
+	Folder      string    `json:"folder"`
+	UIDValidity uint32    `json:"uidValidity"`
+	LastUID     uint32    `json:"lastUid"`
+	LastSyncAt  time.Time `json:"lastSyncAt"`
+}
+
+type ScanStatus string
+
+const (
+	ScanRunning     ScanStatus = "running"
+	ScanCompleted   ScanStatus = "completed"
+	ScanCancelled   ScanStatus = "cancelled"
+	ScanFailed      ScanStatus = "failed"
+	ScanInterrupted ScanStatus = "interrupted"
+)
+
+type ScanRun struct {
+	ID             string     `json:"id"`
+	AccountID      string     `json:"accountId"`
+	Status         ScanStatus `json:"status"`
+	Folder         string     `json:"folder"`
+	Processed      int        `json:"processed"`
+	EstimatedTotal int        `json:"estimatedTotal"`
+	StartedAt      time.Time  `json:"startedAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
+	Error          string     `json:"error,omitempty"`
+}

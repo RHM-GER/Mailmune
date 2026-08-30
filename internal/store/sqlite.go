@@ -31,38 +31,6 @@ func Open(path string) (*SQLite, error) {
 
 func (s *SQLite) Close() error { return s.db.Close() }
 
-func (s *SQLite) migrate(ctx context.Context) error {
-	const schema = `
-CREATE TABLE IF NOT EXISTS accounts (
- id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL,
- username TEXT NOT NULL, secret_ref TEXT NOT NULL, inbox_folder TEXT NOT NULL,
- sent_folder TEXT NOT NULL, spam_folder TEXT NOT NULL, safety_mode TEXT NOT NULL,
- ollama_model TEXT NOT NULL DEFAULT '', ollama_validated INTEGER NOT NULL DEFAULT 0,
- enabled INTEGER NOT NULL DEFAULT 1, dry_run INTEGER NOT NULL DEFAULT 1,
- profile_json TEXT NOT NULL, last_scan_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS decisions (
- id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
- uid_validity INTEGER NOT NULL, uid INTEGER NOT NULL, message_id_hash TEXT NOT NULL,
- origin_folder TEXT NOT NULL, current_folder TEXT NOT NULL, sender TEXT NOT NULL,
- subject TEXT NOT NULL, score REAL NOT NULL, status TEXT NOT NULL, evidence_json TEXT NOT NULL,
- model_version TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL UNIQUE,
- received_at TEXT NOT NULL, created_at TEXT NOT NULL, reviewed_at TEXT,
- UNIQUE(account_id, uid_validity, uid, origin_folder)
-);
-CREATE INDEX IF NOT EXISTS idx_decisions_review ON decisions(status, received_at DESC);
-CREATE TABLE IF NOT EXISTS review_operations (
- idempotency_key TEXT PRIMARY KEY, action TEXT NOT NULL, created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS daily_stats (
- day TEXT NOT NULL, account_id TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0,
- moved INTEGER NOT NULL DEFAULT 0, confirmed INTEGER NOT NULL DEFAULT 0,
- rejected INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, account_id)
-);`
-	_, err := s.db.ExecContext(ctx, schema)
-	return err
-}
-
 func (s *SQLite) UpsertAccount(ctx context.Context, account domain.AccountConfig) error {
 	profile, err := json.Marshal(account.Profile)
 	if err != nil {
