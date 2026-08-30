@@ -2,8 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mailmune.local/contracts/v1/types.schema.json",
   "title": "Mailmune API v1",
+  "description": "Versionierte Vertragstypen der lokalen Mailmune-API. Fehlerantworten tragen immer einen stabilen Code und einen redigierten Text. Es gibt keine Endpunkte zum Löschen von E-Mails.",
   "type": "object",
   "$defs": {
+    "Error": {
+      "type": "object",
+      "required": ["error", "code"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "Evidence": {
       "type": "object",
       "required": ["group", "code", "weight", "summary"],
@@ -12,6 +22,90 @@
         "code": { "type": "string" },
         "weight": { "type": "number", "minimum": -1, "maximum": 1 },
         "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "SafetyMode": {
+      "enum": ["confirm_all", "safe", "aggressive"]
+    },
+    "MailboxProfile": {
+      "type": "object",
+      "required": ["purpose", "industry", "languages", "expectedMailTypes", "trustedDomains", "trustedSenders", "wantedNewsletters", "legitimateAutomated"],
+      "properties": {
+        "purpose": { "type": "string" },
+        "industry": { "type": "string" },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "expectedMailTypes": { "type": "array", "items": { "type": "string" } },
+        "trustedDomains": { "type": "array", "items": { "type": "string" } },
+        "trustedSenders": { "type": "array", "items": { "type": "string" } },
+        "wantedNewsletters": { "type": "array", "items": { "type": "string" } },
+        "legitimateAutomated": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "Account": {
+      "type": "object",
+      "required": ["id", "name", "host", "port", "username", "secretRef", "inboxFolder", "sentFolder", "spamFolder", "safetyMode", "ollamaValidated", "enabled", "dryRun", "createdAt", "updatedAt", "profile"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "username": { "type": "string" },
+        "secretRef": { "type": "string", "description": "Referenz in den Betriebssystem-Schlüsselbund; niemals das Passwort selbst." },
+        "inboxFolder": { "type": "string" },
+        "sentFolder": { "type": "string" },
+        "spamFolder": { "type": "string" },
+        "safetyMode": { "$ref": "#/$defs/SafetyMode" },
+        "ollamaModel": { "type": "string" },
+        "ollamaValidated": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "dryRun": { "type": "boolean", "description": "Neue Konten sind immer true; automatische Aktionen erfordern eine spätere ausdrückliche Änderung." },
+        "lastScanAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "profile": { "$ref": "#/$defs/MailboxProfile" }
+      },
+      "additionalProperties": false
+    },
+    "ConnectionInfo": {
+      "type": "object",
+      "required": ["folders", "supportsIdle", "supportsMove"],
+      "properties": {
+        "folders": { "type": "array", "items": { "type": "string" } },
+        "supportsIdle": { "type": "boolean" },
+        "supportsMove": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ScanStatus": {
+      "enum": ["running", "completed", "cancelled", "failed", "interrupted"]
+    },
+    "ScanRun": {
+      "type": "object",
+      "required": ["id", "accountId", "status", "folder", "processed", "estimatedTotal", "startedAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "accountId": { "type": "string" },
+        "status": { "$ref": "#/$defs/ScanStatus" },
+        "folder": { "type": "string" },
+        "processed": { "type": "integer", "minimum": 0 },
+        "estimatedTotal": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "error": { "type": "string", "description": "Redigierte, nutzerfreundliche Fehlermeldung ohne Geheimnisse." }
+      },
+      "additionalProperties": false
+    },
+    "ScanEvent": {
+      "type": "object",
+      "required": ["run"],
+      "properties": {
+        "run": { "$ref": "#/$defs/ScanRun" },
+        "candidates": { "type": "integer", "minimum": 0 },
+        "moved": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },
@@ -27,6 +121,24 @@
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/Evidence" } },
         "receivedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Summary": {
+      "type": "object",
+      "required": ["accounts", "pending", "moved", "confirmed", "rejected", "falsePositiveRate", "processedWeek"],
+      "properties": {
+        "accounts": { "type": "integer", "minimum": 0 },
+        "pending": { "type": "integer", "minimum": 0 },
+        "moved": { "type": "integer", "minimum": 0 },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "falsePositiveRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "processedWeek": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "EventStream": {
+      "description": "SSE-Ereignisse unter GET /v1/events. Ereignistypen: ready, heartbeat, scan.started, scan.progress, scan.finished, account.updated.",
+      "type": "string"
     }
   }
 }
