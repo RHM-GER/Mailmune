@@ -2,46 +2,70 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/RHM-GER/Mailmune/internal/classifier"
 	"github.com/RHM-GER/Mailmune/internal/domain"
+	"github.com/RHM-GER/Mailmune/internal/events"
 	"github.com/RHM-GER/Mailmune/internal/mailbox"
 	"github.com/RHM-GER/Mailmune/internal/provider"
 	"github.com/RHM-GER/Mailmune/internal/secrets"
 	"github.com/RHM-GER/Mailmune/internal/store"
 )
 
+// Service wires storage, secrets, IMAP access and the scan scheduler
+// together. All mail access is read-only unless an account was explicitly
+// taken out of dry run.
 type Service struct {
 	store   *store.SQLite
 	secrets secrets.Store
 	mailbox *mailbox.Client
 	rules   *classifier.Rules
 	ollama  *provider.Ollama
+	hub     *events.Hub
+	scanner *Scanner
 }
 
+// SaveAccountRequest creates or updates an account. For idempotent creation
+// clients generate the account ID once (e.g. a UUID) and resend the same ID
+// on retry; the upsert then cannot duplicate the account.
 type SaveAccountRequest struct {
 	Account  domain.AccountConfig `json:"account"`
 	Password string               `json:"password,omitempty"`
 }
-type ScanResult struct {
-	Processed  int      `json:"processed"`
-	Candidates int      `json:"candidates"`
-	Moved      int      `json:"moved"`
-	DryRun     bool     `json:"dryRun"`
-	Warnings   []string `json:"warnings"`
+
+// New builds the production service with the default strict IMAP client.
+func New(db *store.SQLite, secretStore secrets.Store) *Service {
+	return NewWithMailbox(db, secretStore, mailbox.NewClient())
 }
 
-func New(db *store.SQLite, secretStore secrets.Store) *Service {
-	return &Service{store: db, secrets: secretStore, mailbox: mailbox.NewClient(), rules: classifier.NewRules(), ollama: provider.NewOllama("")}
+// NewWithMailbox allows tests to inject an IMAP client that trusts a
+// self-signed test CA. Production code uses New.
+func NewWithMailbox(db *store.SQLite, secretStore secrets.Store, client *mailbox.Client) *Service {
+	hub := events.NewHub()
+	service := &Service{
+		store:   db,
+		secrets: secretStore,
+		mailbox: client,
+		rules:   classifier.NewRules(),
+		ollama:  provider.NewOllama(""),
+		hub:     hub,
+	}
+	service.scanner = newScanner(db, secretStore, client, service.rules, service.ollama, hub)
+	if _, err := service.scanner.RecoverInterrupted(context.Background()); err != nil {
+		// The database is local and required; failing here means the agent
+		// cannot run anyway.
+		panic(fmt.Errorf("recover interrupted scan runs: %w", err))
+	}
+	return service
 }
+
+// Hub exposes the event stream used by the local API.
+func (s *Service) Hub() *events.Hub { return s.hub }
 
 func (s *Service) Accounts(ctx context.Context) ([]domain.AccountConfig, error) {
 	return s.store.ListAccounts(ctx)
@@ -52,7 +76,13 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 	now := time.Now().UTC()
 	if a.ID == "" {
 		a.ID = uuid.NewString()
+	}
+	isNew := !s.accountExists(ctx, a.ID)
+	if isNew {
 		a.CreatedAt = now
+		// Product rule: new mailboxes always begin in a reading dry run.
+		// Automation requires an explicit later change plus confirmation.
+		a.DryRun = true
 	}
 	a.UpdatedAt = now
 	if a.Port == 0 {
@@ -61,11 +91,19 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 	if a.InboxFolder == "" {
 		a.InboxFolder = "INBOX"
 	}
+	if a.SentFolder == "" {
+		a.SentFolder = "Sent"
+	}
 	if a.SpamFolder == "" {
 		a.SpamFolder = "AI_SPAM_FILTER"
 	}
 	if a.SafetyMode == "" {
 		a.SafetyMode = domain.SafetySafe
+	}
+	switch a.SafetyMode {
+	case domain.SafetyConfirmAll, domain.SafetySafe, domain.SafetyAggressive:
+	default:
+		return a, errors.New("unsupported safety mode")
 	}
 	if a.Host == "" || a.Username == "" || a.Name == "" {
 		return a, errors.New("name, host and username are required")
@@ -77,13 +115,31 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 		if err := s.secrets.Set(a.SecretRef, request.Password); err != nil {
 			return a, fmt.Errorf("store password: %w", err)
 		}
-	} else if _, err := s.secrets.Get(a.SecretRef); err != nil {
+	} else if isNew {
 		return a, errors.New("password is required for a new account")
+	} else if _, err := s.secrets.Get(a.SecretRef); err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return a, errors.New("stored password is missing; provide it again")
+		}
+		return a, err
 	}
 	if err := s.store.UpsertAccount(ctx, a); err != nil {
 		return a, err
 	}
+	if s.hub != nil {
+		s.hub.Publish("account.updated", a)
+	}
 	return a, nil
+}
+
+// accountExists reports whether an account ID is already stored, so an
+// update with a known ID is never mistaken for a first-time creation.
+func (s *Service) accountExists(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	_, err := s.store.Account(ctx, id)
+	return err == nil
 }
 
 func (s *Service) TestAccount(ctx context.Context, id string) (mailbox.ConnectionInfo, error) {
@@ -93,82 +149,43 @@ func (s *Service) TestAccount(ctx context.Context, id string) (mailbox.Connectio
 	}
 	password, err := s.secrets.Get(a.SecretRef)
 	if err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			return mailbox.ConnectionInfo{}, errors.New("stored password is missing; save the account again")
+		}
 		return mailbox.ConnectionInfo{}, err
 	}
 	return s.mailbox.TestConnection(ctx, a, password)
 }
 
-func (s *Service) Scan(ctx context.Context, id string) (ScanResult, error) {
-	a, err := s.store.Account(ctx, id)
-	if err != nil {
-		return ScanResult{}, err
-	}
-	password, err := s.secrets.Get(a.SecretRef)
-	if err != nil {
-		return ScanResult{}, err
-	}
-	messages, _, err := s.mailbox.ScanMetadata(ctx, a, password, a.InboxFolder, 1000, time.Now().AddDate(0, 0, -90))
-	if err != nil {
-		return ScanResult{}, err
-	}
-	result := ScanResult{Processed: len(messages), DryRun: a.DryRun}
-	for _, message := range messages {
-		classification := s.rules.Classify(message, a.Profile)
-		if a.OllamaValidated && a.OllamaModel != "" && classification.Score >= 0.25 && classification.Score < 0.98 {
-			verdict, modelErr := s.ollama.Classify(ctx, a.OllamaModel, message, a.Profile)
-			if modelErr == nil {
-				classification.ModelUsed = a.OllamaModel
-				classification.ModelValidated = true
-				classification.Evidence = append(classification.Evidence, domain.Evidence{Group: "model", Code: "local_model_" + verdict.Class, Weight: verdict.Score, Summary: "Lokales validiertes Modell: " + verdict.Class})
-				if verdict.Class == "spam" {
-					classification.Score = classification.Score*0.7 + verdict.Score*0.3
-					classification.IndependentGroups++
-				}
-			}
-		}
-		action := classifier.Decide(a.SafetyMode, classification)
-		if action == classifier.ActionIgnore {
-			continue
-		}
-		result.Candidates++
-		status := domain.StatusPending
-		current := message.Folder
-		if action == classifier.ActionMove && !a.DryRun {
-			destinationUID, moveErr := s.mailbox.MoveAtomic(ctx, a, password, message.Folder, message.UID, a.SpamFolder)
-			if moveErr != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("UID %d nicht verschoben: %v", message.UID, moveErr))
-			} else {
-				status = domain.StatusMoved
-				current = a.SpamFolder
-				result.Moved++
-				if destinationUID != 0 {
-					message.UID = destinationUID
-				}
-			}
-		}
-		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
-		decision := domain.MessageDecision{ID: uuid.NewString(), AccountID: a.ID, UIDValidity: message.UIDValidity, UID: message.UID, MessageIDHash: hex.EncodeToString(hash[:]), OriginFolder: message.Folder, CurrentFolder: current, From: message.From, Subject: message.Subject, Score: classification.Score, Status: status, Evidence: classification.Evidence, ModelVersion: classification.ModelUsed, IdempotencyKey: fmt.Sprintf("scan:%s:%d:%d:%s", a.ID, message.UIDValidity, message.UID, message.Folder), ReceivedAt: message.ReceivedAt, CreatedAt: time.Now().UTC()}
-		if err := s.store.SaveDecision(ctx, decision); err != nil {
-			return result, err
-		}
-	}
-	a.LastScanAt = ptrTime(time.Now().UTC())
-	a.UpdatedAt = time.Now().UTC()
-	_ = s.store.UpsertAccount(ctx, a)
-	return result, nil
+// StartScan begins a background scan run (idempotent per account).
+func (s *Service) StartScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
+	return s.scanner.StartScan(ctx, accountID)
+}
+
+// CancelScan requests cancellation of the account's active run.
+func (s *Service) CancelScan(ctx context.Context, accountID string) (domain.ScanRun, bool, error) {
+	return s.scanner.CancelScan(ctx, accountID)
+}
+
+// ScanRuns lists recent runs of an account, newest first.
+func (s *Service) ScanRuns(ctx context.Context, accountID string, limit int) ([]domain.ScanRun, error) {
+	return s.store.ScanRuns(ctx, accountID, limit)
 }
 
 func (s *Service) Decisions(ctx context.Context, filter store.DecisionFilter) ([]domain.MessageDecision, error) {
 	return s.store.ListDecisions(ctx, filter)
 }
+
 func (s *Service) Review(ctx context.Context, request domain.ReviewRequest) error {
 	return s.store.ApplyReview(ctx, request)
 }
+
 func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 	return s.store.Summary(ctx)
 }
+
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }
+
 func (s *Service) Purge(ctx context.Context) (int64, error) {
 	return s.store.PurgeReadableMetadata(ctx, time.Now().AddDate(0, 0, -180))
 }
-func ptrTime(value time.Time) *time.Time { return &value }
