@@ -1,13 +1,11 @@
 package mailbox
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
-	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -15,13 +13,19 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
-	"github.com/RHM-GER/Mailmune/internal/classifier"
 	"github.com/RHM-GER/Mailmune/internal/domain"
 )
 
 var ErrMoveUnsupported = errors.New("server does not support atomic IMAP MOVE")
 
-type Client struct{ timeout time.Duration }
+// Client is a strictly read-optimized IMAP client. Every connection uses TLS
+// with full certificate verification; there is no plaintext and no way to
+// disable verification. tlsTemplate is only set by tests to provide a trusted
+// test CA and never changes the verification requirements.
+type Client struct {
+	timeout     time.Duration
+	tlsTemplate *tls.Config
+}
 
 type ConnectionInfo struct {
 	Folders      []string `json:"folders"`
@@ -30,6 +34,21 @@ type ConnectionInfo struct {
 }
 
 func NewClient() *Client { return &Client{timeout: 30 * time.Second} }
+
+func (m *Client) tlsConfig(host string) *tls.Config {
+	var cfg *tls.Config
+	if m.tlsTemplate != nil {
+		cfg = m.tlsTemplate.Clone()
+	} else {
+		cfg = &tls.Config{}
+	}
+	cfg.InsecureSkipVerify = false
+	if cfg.MinVersion < tls.VersionTLS12 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	cfg.ServerName = host
+	return cfg
+}
 
 func (m *Client) connect(account domain.AccountConfig, password string) (*imapclient.Client, error) {
 	if account.Port <= 0 {
@@ -40,7 +59,7 @@ func (m *Client) connect(account domain.AccountConfig, password string) (*imapcl
 		return nil, errors.New("host and password are required")
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(account.Port))
-	options := &imapclient.Options{TLSConfig: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}, Dialer: &net.Dialer{Timeout: m.timeout, KeepAlive: 30 * time.Second}}
+	options := &imapclient.Options{TLSConfig: m.tlsConfig(host), Dialer: &net.Dialer{Timeout: m.timeout, KeepAlive: 30 * time.Second}}
 	client, err := imapclient.DialTLS(address, options)
 	if err != nil {
 		return nil, fmt.Errorf("secure IMAP connection: %w", err)
@@ -49,7 +68,25 @@ func (m *Client) connect(account domain.AccountConfig, password string) (*imapcl
 		client.Close()
 		return nil, fmt.Errorf("IMAP login: %w", err)
 	}
+	// RFC 9051: IMAP4rev2 must be explicitly enabled by the client. MOVE and
+	// IDLE are part of the rev2 core and are no longer advertised separately.
+	if client.Caps().Has(imap.CapIMAP4rev2) {
+		if _, err := client.Enable(imap.CapIMAP4rev2).Wait(); err != nil {
+			client.Close()
+			return nil, fmt.Errorf("enable IMAP4rev2: %w", err)
+		}
+	}
 	return client, nil
+}
+
+// supportsMove reports whether atomic MOVE is available. For IMAP4rev2
+// servers MOVE is mandatory and not advertised as a separate capability.
+func supportsMove(caps imap.CapSet) bool {
+	return caps.Has(imap.CapMove) || caps.Has(imap.CapIMAP4rev2)
+}
+
+func supportsIdle(caps imap.CapSet) bool {
+	return caps.Has(imap.CapIdle) || caps.Has(imap.CapIMAP4rev2)
 }
 
 func (m *Client) TestConnection(ctx context.Context, account domain.AccountConfig, password string) (ConnectionInfo, error) {
@@ -65,13 +102,13 @@ func (m *Client) TestConnection(ctx context.Context, account domain.AccountConfi
 			return
 		}
 		defer client.Close()
-		defer client.Logout().Wait()
+		defer func() { _ = client.Logout().Wait() }()
 		boxes, err := client.List("", "*", nil).Collect()
 		if err != nil {
 			ch <- result{err: fmt.Errorf("list folders: %w", err)}
 			return
 		}
-		info := ConnectionInfo{SupportsIdle: client.Caps().Has(imap.CapIdle), SupportsMove: client.Caps().Has(imap.CapMove)}
+		info := ConnectionInfo{SupportsIdle: supportsIdle(client.Caps()), SupportsMove: supportsMove(client.Caps())}
 		for _, box := range boxes {
 			info.Folders = append(info.Folders, box.Mailbox)
 		}
@@ -86,89 +123,18 @@ func (m *Client) TestConnection(ctx context.Context, account domain.AccountConfi
 }
 
 // ScanMetadata reads envelopes, selected headers and attachment metadata only.
-// It never changes flags, folders or message contents.
+// It never changes flags, folders or message contents. It is kept as a thin
+// wrapper over SyncFolder for callers that want a bounded metadata snapshot.
 func (m *Client) ScanMetadata(ctx context.Context, account domain.AccountConfig, password, folder string, maxMessages int, since time.Time) ([]domain.MessageFeatures, uint32, error) {
-	if maxMessages <= 0 || maxMessages > 1000 {
-		maxMessages = 1000
+	var collected []domain.MessageFeatures
+	outcome, err := m.SyncFolder(ctx, account, password, folder, nil, SyncOptions{MaxMessages: maxMessages, Since: since}, func(features domain.MessageFeatures, _ string) error {
+		collected = append(collected, features)
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-	type result struct {
-		messages []domain.MessageFeatures
-		validity uint32
-		err      error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		client, err := m.connect(account, password)
-		if err != nil {
-			ch <- result{err: err}
-			return
-		}
-		defer client.Close()
-		defer client.Logout().Wait()
-		selected, err := client.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
-		if err != nil {
-			ch <- result{err: fmt.Errorf("select %s read-only: %w", folder, err)}
-			return
-		}
-		if selected.NumMessages == 0 {
-			ch <- result{validity: selected.UIDValidity}
-			return
-		}
-		start := uint32(1)
-		if selected.NumMessages > uint32(maxMessages) {
-			start = selected.NumMessages - uint32(maxMessages) + 1
-		}
-		set := imap.SeqSet{}
-		set.AddRange(start, selected.NumMessages)
-		headerSection := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader, HeaderFields: []string{"List-Unsubscribe", "List-Id", "Auto-Submitted", "Reply-To", "Message-ID"}, Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: 64 << 10}}
-		options := &imap.FetchOptions{UID: true, Envelope: true, InternalDate: true, RFC822Size: true, BodyStructure: &imap.FetchItemBodyStructure{Extended: true}, BodySection: []*imap.FetchItemBodySection{headerSection}}
-		fetched, err := client.Fetch(set, options).Collect()
-		if err != nil {
-			ch <- result{err: fmt.Errorf("fetch metadata: %w", err)}
-			return
-		}
-		messages := make([]domain.MessageFeatures, 0, len(fetched))
-		for _, item := range fetched {
-			if item.Envelope == nil || (!since.IsZero() && item.InternalDate.Before(since)) {
-				continue
-			}
-			feature := domain.MessageFeatures{AccountID: account.ID, UIDValidity: selected.UIDValidity, UID: uint32(item.UID), Folder: folder, Subject: item.Envelope.Subject, MessageID: item.Envelope.MessageID, ReceivedAt: item.InternalDate}
-			if len(item.Envelope.From) > 0 {
-				feature.From = item.Envelope.From[0].Addr()
-				feature.FromDomain = classifier.ExtractDomain(feature.From)
-			}
-			if len(item.Envelope.ReplyTo) > 0 {
-				feature.ReplyTo = item.Envelope.ReplyTo[0].Addr()
-			}
-			headerBytes := item.FindBodySection(headerSection)
-			if len(headerBytes) > 0 {
-				if parsed, err := mail.ReadMessage(bytes.NewReader(headerBytes)); err == nil {
-					feature.ListUnsubscribe = parsed.Header.Get("List-Unsubscribe") != ""
-				}
-			}
-			if item.BodyStructure != nil {
-				item.BodyStructure.Walk(func(_ []int, part imap.BodyStructure) bool {
-					single, ok := part.(*imap.BodyStructureSinglePart)
-					if !ok {
-						return true
-					}
-					filename := single.Filename()
-					if filename != "" {
-						feature.Attachments = append(feature.Attachments, domain.AttachmentMetadata{Filename: filename, MIMEType: single.MediaType(), Size: int64(single.Size)})
-					}
-					return true
-				})
-			}
-			messages = append(messages, feature)
-		}
-		ch <- result{messages: messages, validity: selected.UIDValidity}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, 0, ctx.Err()
-	case value := <-ch:
-		return value.messages, value.validity, value.err
-	}
+	return collected, outcome.UIDValidity, nil
 }
 
 // MoveAtomic deliberately refuses the library's COPY+STORE+EXPUNGE fallback.
@@ -186,8 +152,8 @@ func (m *Client) MoveAtomic(ctx context.Context, account domain.AccountConfig, p
 			return
 		}
 		defer client.Close()
-		defer client.Logout().Wait()
-		if !client.Caps().Has(imap.CapMove) {
+		defer func() { _ = client.Logout().Wait() }()
+		if !supportsMove(client.Caps()) {
 			ch <- result{err: ErrMoveUnsupported}
 			return
 		}
