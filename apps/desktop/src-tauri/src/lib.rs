@@ -221,7 +221,7 @@ async fn pump_agent_events(app: AppHandle, runtime: Arc<AgentRuntime>) {
             }
             None => {}
         }
-        tauri::async_runtime::sleep(backoff).await;
+        tokio::time::sleep(backoff).await;
         backoff = std::cmp::min(backoff * 2, std::time::Duration::from_secs(30));
     }
 }
