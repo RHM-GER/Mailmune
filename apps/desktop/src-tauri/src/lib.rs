@@ -280,7 +280,8 @@ pub fn run() {
     let runtime = Arc::new(AgentRuntime::default());
     let runtime_for_setup = runtime.clone();
 
-    tauri::Builder::default()
+    #[cfg_attr(debug_assertions, allow(unused_mut))]
+    let mut builder = tauri::Builder::default()
         .manage(runtime)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
@@ -288,8 +289,16 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
-        ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        ));
+
+    // Signed updates ship in Phase 4. Dev builds skip the updater plugin
+    // because it requires a real signing key and update endpoints.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
