@@ -304,7 +304,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
               <TableCell className={`px-4 font-mono text-xs transition-colors ${shortDivider}`} style={{ color: scoreColor(item.score) }}>{Math.round(item.score * 100)} %</TableCell>
               <TableCell className={`truncate px-4 text-xs text-[#888] ${shortDivider}`}>{spamCategory(item)}</TableCell>
               <TableCell className={`px-4 ${shortDivider}`}><p className="truncate text-sm">{item.subject}</p><p className="mt-1 truncate text-xs text-[#666]">{item.evidence.map((entry) => entry.summary).join(" · ")}</p></TableCell>
-              <TableCell className="whitespace-nowrap px-4 text-xs text-[#888] ${shortDivider}`}>{new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.receivedAt))}</TableCell>
+              <TableCell className={`whitespace-nowrap px-4 text-xs text-[#888] ${shortDivider}`}>{new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.receivedAt))}</TableCell>
               <TableCell className="px-4"><StatusBadge status={item.status} /></TableCell>
             </TableRow>
           })}{filtered.length === 0 && <TableRow><TableCell colSpan={7} className="h-40 text-center text-sm text-[#666]">{isTauri() && !agentOnline ? "Der lokale Agent ist noch nicht erreichbar." : "Keine Nachrichten für diese Ansicht."}</TableCell></TableRow>}</TableBody>
