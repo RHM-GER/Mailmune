@@ -95,7 +95,7 @@ func TestNewAccountsAlwaysStartInDryRun(t *testing.T) {
 	}
 	// A scan of an obvious spam candidate must not move anything.
 	spamMessage(server, "Gewinn: Konto gesperrt, sofort handeln", time.Now())
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run := waitForScan(t, svc, account.ID)
@@ -116,7 +116,7 @@ func TestScanLifecycleIdempotencyAndResume(t *testing.T) {
 	spamMessage(server, "Zahlung fehlgeschlagen: sofort handeln", now.Add(-30*time.Minute))
 	server.AddMessage("INBOX", "freund@example.com", "Hallo", "Viele Grüße", now)
 
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run := waitForScan(t, svc, account.ID)
@@ -133,7 +133,7 @@ func TestScanLifecycleIdempotencyAndResume(t *testing.T) {
 	}
 
 	// Second run without new messages: completes and adds nothing.
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run = waitForScan(t, svc, account.ID)
@@ -147,7 +147,7 @@ func TestScanLifecycleIdempotencyAndResume(t *testing.T) {
 
 	// A new spam message is picked up incrementally by UID.
 	spamMessage(server, "Lotterie gewonnen: sofort handeln", now)
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run = waitForScan(t, svc, account.ID)
@@ -171,11 +171,11 @@ func TestScanStartIsIdempotentWhileRunning(t *testing.T) {
 	spamMessage(server, "Gewinn: sofort handeln", time.Now())
 	spamMessage(server, "Konto gesperrt: sofort handeln", time.Now())
 
-	first, err := svc.StartScan(context.Background(), account.ID)
+	first, err := svc.StartScan(context.Background(), account.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.StartScan(context.Background(), account.ID)
+	second, err := svc.StartScan(context.Background(), account.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestScanCancelAndResume(t *testing.T) {
 	}
 	t.Cleanup(func() { svc.scanner.testGate = nil })
 
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	<-blocked
@@ -228,7 +228,7 @@ func TestScanCancelAndResume(t *testing.T) {
 	}
 
 	// Resume: the remaining UIDs are fetched, nothing is duplicated.
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run = waitForScan(t, svc, account.ID)
@@ -322,7 +322,7 @@ func TestScanUsesTrainedLearner(t *testing.T) {
 		"lotteriegewinn bonusjagd jetzt anmelden",
 		time.Now(), "Authentication-Results: mx.test; spf=fail")
 
-	if _, err := svc.StartScan(context.Background(), account.ID); err != nil {
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	run := waitForScan(t, svc, account.ID)

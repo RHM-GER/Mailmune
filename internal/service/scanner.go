@@ -72,8 +72,10 @@ func (s *Scanner) RecoverInterrupted(ctx context.Context) (int64, error) {
 }
 
 // StartScan begins a background scan for an account. Starting a scan that is
-// already running returns the active run unchanged (idempotent).
-func (s *Scanner) StartScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
+// already running returns the active run unchanged (idempotent). When resync
+// is true, the stored UID state of the inbox folder is dropped first, so the
+// whole mailbox is re-read (decisions stay deduplicated by idempotency keys).
+func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) (domain.ScanRun, error) {
 	account, err := s.store.Account(ctx, accountID)
 	if err != nil {
 		return domain.ScanRun{}, fmt.Errorf("account not found: %w", err)
@@ -84,6 +86,11 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string) (domain.ScanR
 			return domain.ScanRun{}, errors.New("stored password is missing; save the account again")
 		}
 		return domain.ScanRun{}, err
+	}
+	if resync {
+		if err := s.store.DeleteFolderSyncState(ctx, accountID, account.InboxFolder); err != nil {
+			return domain.ScanRun{}, err
+		}
 	}
 
 	s.mu.Lock()
@@ -177,7 +184,6 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		s.finish(run.ID, domain.ScanFailed, redactError(err))
 		return result
 	}
-	firstRun := prev.UIDValidity == 0 && prev.LastUID == 0
 
 	progressCounter := 0
 	opts := mailbox.SyncOptions{
@@ -195,10 +201,8 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			}
 		},
 	}
-	if firstRun {
-		// Product rule: the first dry run is bounded to 90 days.
-		opts.Since = time.Now().AddDate(0, 0, -90)
-	}
+	// Note: the bounded 90-day first pass belongs to the profiling feature
+	// (Phase 4). Regular scans read up to MaxMessages newest messages.
 
 	// Load the per-account statistical learner once per run. A missing or
 	// broken model never blocks scanning.

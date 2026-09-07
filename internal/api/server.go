@@ -117,7 +117,16 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request) {
 	respond(w, "account_test_failed", value, err)
 }
 func (s *Server) startScan(w http.ResponseWriter, r *http.Request) {
-	value, err := s.service.StartScan(r.Context(), r.PathValue("id"))
+	var req struct {
+		Resync bool `json:"resync"`
+	}
+	if r.ContentLength > 0 {
+		if err := decode(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err)
+			return
+		}
+	}
+	value, err := s.service.StartScan(r.Context(), r.PathValue("id"), req.Resync)
 	respond(w, "scan_start_failed", value, err)
 }
 func (s *Server) cancelScan(w http.ResponseWriter, r *http.Request) {

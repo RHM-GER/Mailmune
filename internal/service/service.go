@@ -164,9 +164,10 @@ func (s *Service) TestAccount(ctx context.Context, id string) (mailbox.Connectio
 	return s.mailbox.TestConnection(ctx, a, password)
 }
 
-// StartScan begins a background scan run (idempotent per account).
-func (s *Service) StartScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
-	return s.scanner.StartScan(ctx, accountID)
+// StartScan begins a background scan run (idempotent per account). With
+// resync=true the stored UID state is dropped first for a full re-read.
+func (s *Service) StartScan(ctx context.Context, accountID string, resync bool) (domain.ScanRun, error) {
+	return s.scanner.StartScan(ctx, accountID, resync)
 }
 
 // CancelScan requests cancellation of the account's active run.

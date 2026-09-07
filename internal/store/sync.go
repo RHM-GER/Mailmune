@@ -37,6 +37,13 @@ ON CONFLICT(account_id,folder) DO UPDATE SET uid_validity=excluded.uid_validity,
 	return err
 }
 
+// DeleteFolderSyncState drops the stored UID state of a folder so the next
+// scan re-reads the whole mailbox.
+func (s *SQLite) DeleteFolderSyncState(ctx context.Context, accountID, folder string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM folder_sync_states WHERE account_id=? AND folder=?", accountID, folder)
+	return err
+}
+
 func (s *SQLite) CreateScanRun(ctx context.Context, run domain.ScanRun) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO scan_runs(id,account_id,status,folder,processed,estimated_total,started_at,updated_at,finished_at,error)
 VALUES(?,?,?,?,?,?,?,?,?,?)`,
