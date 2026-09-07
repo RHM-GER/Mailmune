@@ -176,3 +176,63 @@ type ScanRun struct {
 	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
 	Error          string     `json:"error,omitempty"`
 }
+
+// LearningBaseline records the provenance of an optional, opt-in global
+// learner imported from an external corpus. It is kept separate from the
+// per-account confirmed learning so it can be inspected and deleted without
+// touching user-confirmed knowledge.
+type LearningBaseline struct {
+	ID           string    `json:"id"`
+	Version      int       `json:"version"`
+	Source       string    `json:"source"`
+	License      string    `json:"license"`
+	CorpusRows   int       `json:"corpusRows"`
+	SpamMessages uint64    `json:"spamMessages"`
+	HamMessages  uint64    `json:"hamMessages"`
+	ImportedAt   time.Time `json:"importedAt"`
+}
+
+// MoveDirection distinguishes a move into the spam folder from a restore of a
+// false positive back to its origin folder.
+type MoveDirection string
+
+const (
+	MoveToSpam  MoveDirection = "to_spam"
+	MoveRestore MoveDirection = "restore"
+)
+
+// MoveState is one node of the explicit, crash-safe move state machine.
+// Every transition has preconditions, a timestamp and an idempotency key; a
+// repeated run after a crash never produces a second physical move.
+type MoveState string
+
+const (
+	MovePlanned        MoveState = "planned"
+	MoveMoving         MoveState = "moving"
+	MoveMoved          MoveState = "moved"
+	MoveConfirmed      MoveState = "confirmed"
+	MoveRestoring      MoveState = "restoring"
+	MoveRestored       MoveState = "restored"
+	MoveFailedRetry    MoveState = "failed_retryable"
+	MoveFailedTerminal MoveState = "failed_terminal"
+)
+
+// MoveOperation is one guarded IMAP move tracked by the state machine.
+type MoveOperation struct {
+	ID                string        `json:"id"`
+	AccountID         string        `json:"accountId"`
+	DecisionID        string        `json:"decisionId,omitempty"`
+	Direction         MoveDirection `json:"direction"`
+	OriginFolder      string        `json:"originFolder"`
+	OriginUID         uint32        `json:"originUid"`
+	OriginUIDValidity uint32        `json:"originUidValidity"`
+	TargetFolder      string        `json:"targetFolder"`
+	State             MoveState     `json:"state"`
+	DestUID           uint32        `json:"destUid,omitempty"`
+	DestUIDValidity   uint32        `json:"destUidValidity,omitempty"`
+	MessageIDHash     string        `json:"messageIdHash,omitempty"`
+	Attempts          int           `json:"attempts"`
+	LastError         string        `json:"lastError,omitempty"`
+	CreatedAt         time.Time     `json:"createdAt"`
+	UpdatedAt         time.Time     `json:"updatedAt"`
+}

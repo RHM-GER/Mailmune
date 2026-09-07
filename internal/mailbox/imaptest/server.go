@@ -209,6 +209,25 @@ func (s *Server) Close() error {
 	return s.listener.Close()
 }
 
+// MailboxState exposes a mailbox's current UIDVALIDITY and next UID so tests
+// can assert guarded-move preconditions.
+func (s *Server) MailboxState(name string) MailboxInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	box := s.mailboxes[name]
+	if box == nil {
+		return MailboxInfo{}
+	}
+	return MailboxInfo{UIDValidity: box.uidValidity, NextUID: box.nextUID, NumMessages: uint32(len(box.messages))}
+}
+
+// MailboxInfo is a read-only snapshot of a mailbox's UID state.
+type MailboxInfo struct {
+	UIDValidity uint32
+	NextUID     uint32
+	NumMessages uint32
+}
+
 func splitAddress(address string) (string, string) {
 	parts := strings.SplitN(address, "@", 2)
 	if len(parts) != 2 {

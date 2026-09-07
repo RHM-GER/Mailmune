@@ -361,6 +361,15 @@ func (s *Scanner) publish(typ string, event ScanEvent) {
 	s.hub.Publish(typ, event)
 }
 
+// publishMove announces a completed move/restore so the UI can update the
+// decision's current folder without a full refresh.
+func (s *Scanner) publishMove(accountID string, state domain.MoveState) {
+	if s.hub == nil {
+		return
+	}
+	s.hub.Publish("move.completed", map[string]string{"accountId": accountID, "state": string(state)})
+}
+
 func stateOrNil(state domain.FolderSyncState) *domain.FolderSyncState {
 	if state.UIDValidity == 0 && state.LastUID == 0 {
 		return nil

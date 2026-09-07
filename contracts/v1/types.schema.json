@@ -140,7 +140,7 @@
       "additionalProperties": false
     },
     "EventStream": {
-      "description": "SSE-Ereignisse unter GET /v1/events. Ereignistypen: ready, heartbeat, scan.started, scan.progress, scan.finished, account.updated, model.validated, baseline.updated, baseline.deleted.",
+      "description": "SSE-Ereignisse unter GET /v1/events. Ereignistypen: ready, heartbeat, scan.started, scan.progress, scan.finished, account.updated, model.validated, baseline.updated, baseline.deleted, move.completed.",
       "type": "string"
     },
     "RecommendedModel": {
@@ -199,6 +199,36 @@
         "spamMessages": { "type": "integer", "minimum": 0 },
         "hamMessages": { "type": "integer", "minimum": 0 },
         "importedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "MoveDirection": {
+      "enum": ["to_spam", "restore"]
+    },
+    "MoveState": {
+      "enum": ["planned", "moving", "moved", "confirmed", "restoring", "restored", "failed_retryable", "failed_terminal"]
+    },
+    "MoveOperation": {
+      "description": "Einzelner absturzfest idempotenter IMAP-MOVE. Es gibt ausschliesslich atomares UID MOVE in den Spam-Ordner und Restore zurueck; niemals ein Loeschen.",
+      "type": "object",
+      "required": ["id", "accountId", "direction", "originFolder", "originUid", "originUidValidity", "targetFolder", "state", "attempts", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string", "description": "Idempotenzschluessel; ein wiederholter Plan erzeugt nie eine zweite Bewegung." },
+        "accountId": { "type": "string" },
+        "decisionId": { "type": "string" },
+        "direction": { "$ref": "#/$defs/MoveDirection" },
+        "originFolder": { "type": "string" },
+        "originUid": { "type": "integer", "minimum": 0 },
+        "originUidValidity": { "type": "integer", "minimum": 0 },
+        "targetFolder": { "type": "string" },
+        "state": { "$ref": "#/$defs/MoveState" },
+        "destUid": { "type": "integer", "minimum": 0 },
+        "destUidValidity": { "type": "integer", "minimum": 0 },
+        "messageIdHash": { "type": "string" },
+        "attempts": { "type": "integer", "minimum": 0 },
+        "lastError": { "type": "string", "description": "Redigierte Fehlermeldung ohne Geheimnisse." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": false
     }

@@ -108,6 +108,21 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,uid_validity,ui
 	return err
 }
 
+// UpdateDecisionFolder records the new current folder (and destination UID) of
+// a decision after a completed move, so the review list reflects reality.
+func (s *SQLite) UpdateDecisionFolder(ctx context.Context, decisionID, currentFolder string, destUID uint32, at time.Time) error {
+	query := "UPDATE decisions SET current_folder=?"
+	args := []any{currentFolder}
+	if destUID != 0 {
+		query += ",uid=?"
+		args = append(args, destUID)
+	}
+	query += " WHERE id=?"
+	args = append(args, decisionID)
+	_, err := s.db.ExecContext(ctx, query, args...)
+	return err
+}
+
 type DecisionFilter struct {
 	Status    string
 	AccountID string

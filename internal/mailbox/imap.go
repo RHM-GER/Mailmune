@@ -19,6 +19,31 @@ import (
 
 var ErrMoveUnsupported = errors.New("server does not support atomic IMAP MOVE")
 
+// Guarded-move errors let the state machine classify an outcome precisely
+// instead of blindly retrying.
+var (
+	// ErrUIDValidityChanged means the folder was rebuilt; stored UIDs are
+	// invalid and the account must re-sync before any move.
+	ErrUIDValidityChanged = errors.New("folder UIDVALIDITY changed; resync required")
+	// ErrMessageGone means the UID is no longer in the origin folder. It may
+	// have been moved by an earlier crashed attempt; the caller reconciles by
+	// reading instead of moving again.
+	ErrMessageGone = errors.New("message not present in origin folder")
+	// ErrFolderMissing means the target folder does not exist and controlled
+	// creation was not authorized.
+	ErrFolderMissing = errors.New("target folder does not exist")
+)
+
+// MoveResult describes the outcome of a guarded atomic move.
+type MoveResult struct {
+	DestUID      uint32
+	DestValidity uint32
+	// Confirmed is true only when the server returned COPYUID with the exact
+	// destination UID. An unconfirmed move still happened but must be
+	// reconciled by reading before it is treated as final.
+	Confirmed bool
+}
+
 // Client is a strictly read-optimized IMAP client. Every connection uses TLS
 // with full certificate verification; there is no plaintext and no way to
 // disable verification. roots only replaces the set of trusted certificate
@@ -177,4 +202,127 @@ func (m *Client) MoveAtomic(ctx context.Context, account domain.AccountConfig, p
 		}
 	}
 	return destination, nil
+}
+
+// MoveVerified performs a guarded atomic UID MOVE. Before moving it re-checks
+// that the folder's UIDVALIDITY is unchanged and that the message is still
+// present, and it ensures the target folder exists. It never uses the
+// COPY+STORE+EXPUNGE fallback, so the no-delete invariant holds. The call is
+// synchronous: a cancelled context can never leave an orphaned move in flight.
+func (m *Client) MoveVerified(ctx context.Context, account domain.AccountConfig, password, origin string, uid, expectedValidity uint32, target string, createTarget bool) (MoveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return MoveResult{}, err
+	}
+	client, err := m.connect(ctx, account, password)
+	if err != nil {
+		return MoveResult{}, err
+	}
+	defer client.Close()
+	defer func() { _ = client.Logout().Wait() }()
+
+	if !supportsMove(client.Caps()) {
+		return MoveResult{}, ErrMoveUnsupported
+	}
+	if err := ensureFolder(client, target, createTarget); err != nil {
+		return MoveResult{}, err
+	}
+	selected, err := client.Select(origin, nil).Wait()
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("select %s: %w", origin, err)
+	}
+	if expectedValidity != 0 && selected.UIDValidity != expectedValidity {
+		return MoveResult{}, ErrUIDValidityChanged
+	}
+	exists, err := uidExists(client, uid)
+	if err != nil {
+		return MoveResult{}, err
+	}
+	if !exists {
+		return MoveResult{}, ErrMessageGone
+	}
+	data, err := client.Move(imap.UIDSetNum(imap.UID(uid)), target).Wait()
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("atomic move: %w", err)
+	}
+	result := MoveResult{}
+	if data != nil {
+		result.DestValidity = data.UIDValidity
+		if set, ok := data.DestUIDs.(imap.UIDSet); ok {
+			if nums, complete := set.Nums(); complete && len(nums) == 1 {
+				result.DestUID = uint32(nums[0])
+				result.Confirmed = true
+			}
+		}
+	}
+	return result, nil
+}
+
+// MessageExists reports whether a UID is currently present in a folder and
+// returns that folder's live UIDVALIDITY. It is read-only and used to
+// reconcile an interrupted move: if the origin UID is gone, the move happened.
+func (m *Client) MessageExists(ctx context.Context, account domain.AccountConfig, password, folder string, uid uint32) (bool, uint32, error) {
+	if err := ctx.Err(); err != nil {
+		return false, 0, err
+	}
+	client, err := m.connect(ctx, account, password)
+	if err != nil {
+		return false, 0, err
+	}
+	defer client.Close()
+	defer func() { _ = client.Logout().Wait() }()
+	selected, err := client.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
+	if err != nil {
+		return false, 0, fmt.Errorf("select %s read-only: %w", folder, err)
+	}
+	exists, err := uidExists(client, uid)
+	if err != nil {
+		return false, selected.UIDValidity, err
+	}
+	return exists, selected.UIDValidity, nil
+}
+
+// ensureFolder verifies the target folder exists, creating it only when
+// explicitly authorized. Controlled creation never deletes anything.
+func ensureFolder(client *imapclient.Client, folder string, createIfMissing bool) error {
+	boxes, err := client.List("", "*", nil).Collect()
+	if err != nil {
+		return fmt.Errorf("list folders: %w", err)
+	}
+	for _, box := range boxes {
+		if box.Mailbox == folder {
+			return nil
+		}
+	}
+	if !createIfMissing {
+		return ErrFolderMissing
+	}
+	if err := client.Create(folder, nil).Wait(); err != nil {
+		return fmt.Errorf("create folder %s: %w", folder, err)
+	}
+	return nil
+}
+
+// uidExists performs a minimal UID FETCH to confirm a single UID is present.
+func uidExists(client *imapclient.Client, uid uint32) (bool, error) {
+	cmd := client.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{UID: true})
+	found := false
+	for {
+		message := cmd.Next()
+		if message == nil {
+			break
+		}
+		for {
+			item := message.Next()
+			if item == nil {
+				break
+			}
+			if _, ok := item.(imapclient.FetchItemDataUID); ok {
+				found = true
+			}
+		}
+	}
+	if err := cmd.Close(); err != nil {
+		return false, err
+	}
+	return found, nil
 }

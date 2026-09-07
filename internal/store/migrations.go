@@ -142,6 +142,36 @@ var migrations = []migration{
 )`,
 		},
 	},
+	{
+		id:   5,
+		name: "move_operations",
+		stmts: []string{
+			// Explicit, crash-safe state machine for every IMAP move. A row is
+			// written as 'moving' before the atomic UID MOVE and advanced only
+			// after the server confirms; a crash leaves a 'moving' row that the
+			// next start reconciles by reading, never by a blind re-move. The
+			// idempotency key makes a repeated plan a no-op.
+			`CREATE TABLE IF NOT EXISTS move_operations (
+ id TEXT PRIMARY KEY,
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+ decision_id TEXT,
+ direction TEXT NOT NULL,
+ origin_folder TEXT NOT NULL,
+ origin_uid INTEGER NOT NULL,
+ origin_uid_validity INTEGER NOT NULL,
+ target_folder TEXT NOT NULL,
+ state TEXT NOT NULL,
+ dest_uid INTEGER NOT NULL DEFAULT 0,
+ dest_uid_validity INTEGER NOT NULL DEFAULT 0,
+ message_id_hash TEXT NOT NULL DEFAULT '',
+ attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+)`,
+			`CREATE INDEX IF NOT EXISTS idx_move_ops_account ON move_operations(account_id, state)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

@@ -29,6 +29,7 @@ type Service struct {
 	ollama  *provider.Ollama
 	hub     *events.Hub
 	scanner *Scanner
+	mover   *Mover
 }
 
 // SaveAccountRequest creates or updates an account. For idempotent creation
@@ -63,10 +64,14 @@ func NewWithMailbox(db *store.SQLite, secretStore secrets.Store, client *mailbox
 		hub:     hub,
 	}
 	service.scanner = newScanner(db, secretStore, client, service.rules, service.ollama, hub)
+	service.mover = newMover(service.scanner)
 	if _, err := service.scanner.RecoverInterrupted(context.Background()); err != nil {
 		// The database is local and required; failing here means the agent
 		// cannot run anyway.
 		panic(fmt.Errorf("recover interrupted scan runs: %w", err))
+	}
+	if _, err := service.mover.RecoverStuckMoves(context.Background()); err != nil {
+		panic(fmt.Errorf("recover stuck move operations: %w", err))
 	}
 	return service
 }
@@ -197,8 +202,45 @@ func (s *Service) Review(ctx context.Context, request domain.ReviewRequest) erro
 	}
 	if request.Action == domain.ReviewConfirm || request.Action == domain.ReviewReject {
 		s.trainFromReview(ctx, request)
+		s.applyMovesFromReview(ctx, request)
 	}
 	return nil
+}
+
+// applyMovesFromReview drives the move state machine for reviewed decisions.
+// It is best-effort: a failed move never rolls back the human review, and in a
+// dry run nothing is moved at all. Confirmed spam may move to the spam folder;
+// a rejected (false-positive) message that had been moved is restored.
+func (s *Service) applyMovesFromReview(ctx context.Context, request domain.ReviewRequest) {
+	decisions, err := s.store.DecisionsByIDs(ctx, request.DecisionIDs)
+	if err != nil {
+		return
+	}
+	accounts := map[string]domain.AccountConfig{}
+	for _, decision := range decisions {
+		account, ok := accounts[decision.AccountID]
+		if !ok {
+			loaded, err := s.store.Account(ctx, decision.AccountID)
+			if err != nil {
+				continue
+			}
+			account = loaded
+			accounts[decision.AccountID] = account
+		}
+		if !AutomationAllowed(account) {
+			continue
+		}
+		// Reflect the review status onto the decision for the mover.
+		if request.Action == domain.ReviewConfirm {
+			decision.Status = domain.StatusConfirmed
+		} else {
+			decision.Status = domain.StatusRejected
+		}
+		if err := s.mover.ApplyReviewOutcome(ctx, account, decision); err != nil {
+			// Record but continue; the review itself already succeeded.
+			continue
+		}
+	}
 }
 
 // trainFromReview folds confirmed/rejected decisions into the per-account
