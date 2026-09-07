@@ -236,3 +236,42 @@ type MoveOperation struct {
 	CreatedAt         time.Time     `json:"createdAt"`
 	UpdatedAt         time.Time     `json:"updatedAt"`
 }
+
+// CalibrationBucket is one score band with the observed spam rate among
+// human-reviewed decisions. A well-calibrated filter has MeanScore close to
+// SpamRate.
+type CalibrationBucket struct {
+	Lower     float64 `json:"lower"`
+	Upper     float64 `json:"upper"`
+	Count     int     `json:"count"`
+	MeanScore float64 `json:"meanScore"`
+	SpamRate  float64 `json:"spamRate"`
+}
+
+// ThresholdMetric is precision/recall/FPR at one decision threshold, measured
+// against human-confirmed labels within the reviewed candidate population.
+type ThresholdMetric struct {
+	Threshold float64 `json:"threshold"`
+	TP        int     `json:"tp"`
+	FP        int     `json:"fp"`
+	TN        int     `json:"tn"`
+	FN        int     `json:"fn"`
+	Precision float64 `json:"precision"`
+	Recall    float64 `json:"recall"`
+	FPR       float64 `json:"fpr"`
+}
+
+// CalibrationReport summarizes how well the filter agrees with human reviews.
+// It is computed only from confirmed/rejected decisions, so it reflects real
+// local ground truth and never invented data.
+type CalibrationReport struct {
+	AccountID  string              `json:"accountId"`
+	Reviewed   int                 `json:"reviewed"`
+	Confirmed  int                 `json:"confirmed"`
+	Rejected   int                 `json:"rejected"`
+	Thresholds []ThresholdMetric   `json:"thresholds"`
+	Buckets    []CalibrationBucket `json:"buckets"`
+	// AutoMoveReady is true when precision at the safe auto-move threshold
+	// meets the 99.5% target on a meaningful sample.
+	AutoMoveReady bool `json:"autoMoveReady"`
+}

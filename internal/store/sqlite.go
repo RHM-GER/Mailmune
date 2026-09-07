@@ -201,6 +201,27 @@ func (s *SQLite) DecisionsByIDs(ctx context.Context, ids []string) ([]domain.Mes
 	return list, rows.Err()
 }
 
+// ReviewedDecisions returns the human-confirmed (spam) and rejected (ham)
+// decisions of an account. They are the ground truth for calibration; pending
+// and deferred decisions are excluded.
+func (s *SQLite) ReviewedDecisions(ctx context.Context, accountID string) ([]domain.MessageDecision, error) {
+	query := "SELECT " + decisionColumns + " FROM decisions WHERE account_id=? AND status IN (?,?)"
+	rows, err := s.db.QueryContext(ctx, query, accountID, string(domain.StatusConfirmed), string(domain.StatusRejected))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []domain.MessageDecision
+	for rows.Next() {
+		decision, err := scanDecision(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, decision)
+	}
+	return list, rows.Err()
+}
+
 func scanDecision(rows *sql.Rows) (domain.MessageDecision, error) {
 	var d domain.MessageDecision
 	var evidence, received, created string

@@ -49,6 +49,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("POST /v1/accounts/{id}/scans", s.startScan)
 	mux.HandleFunc("POST /v1/accounts/{id}/scans/cancel", s.cancelScan)
 	mux.HandleFunc("GET /v1/accounts/{id}/scans", s.scanRuns)
+	mux.HandleFunc("GET /v1/accounts/{id}/calibration", s.calibration)
 	mux.HandleFunc("GET /v1/decisions", s.decisions)
 	mux.HandleFunc("POST /v1/reviews", s.review)
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -148,6 +149,10 @@ func (s *Server) scanRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	value, err := s.service.ScanRuns(r.Context(), r.PathValue("id"), limit)
 	respond(w, "scan_runs_failed", value, err)
+}
+func (s *Server) calibration(w http.ResponseWriter, r *http.Request) {
+	value, err := s.service.CalibrationReport(r.Context(), r.PathValue("id"))
+	respond(w, "calibration_failed", value, err)
 }
 func (s *Server) decisions(w http.ResponseWriter, r *http.Request) {
 	filter := store.DecisionFilter{Status: r.URL.Query().Get("status"), AccountID: r.URL.Query().Get("accountId"), Query: r.URL.Query().Get("q")}

@@ -231,6 +231,48 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": false
+    },
+    "ThresholdMetric": {
+      "type": "object",
+      "required": ["threshold", "tp", "fp", "tn", "fn", "precision", "recall", "fpr"],
+      "properties": {
+        "threshold": { "type": "number" },
+        "tp": { "type": "integer", "minimum": 0 },
+        "fp": { "type": "integer", "minimum": 0 },
+        "tn": { "type": "integer", "minimum": 0 },
+        "fn": { "type": "integer", "minimum": 0 },
+        "precision": { "type": "number", "minimum": 0, "maximum": 1 },
+        "recall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fpr": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "CalibrationBucket": {
+      "type": "object",
+      "required": ["lower", "upper", "count", "meanScore", "spamRate"],
+      "properties": {
+        "lower": { "type": "number" },
+        "upper": { "type": "number" },
+        "count": { "type": "integer", "minimum": 0 },
+        "meanScore": { "type": "number" },
+        "spamRate": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "CalibrationReport": {
+      "description": "Qualitaet des Filters gemessen an menschlich bestaetigten Reviews. autoMoveReady ist true, wenn die Praezision am Auto-Move-Threshold (0.98) auf einer ausreichenden Stichprobe mindestens 99.5 Prozent betraegt.",
+      "type": "object",
+      "required": ["accountId", "reviewed", "confirmed", "rejected", "thresholds", "buckets", "autoMoveReady"],
+      "properties": {
+        "accountId": { "type": "string" },
+        "reviewed": { "type": "integer", "minimum": 0 },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "thresholds": { "type": "array", "items": { "$ref": "#/$defs/ThresholdMetric" } },
+        "buckets": { "type": "array", "items": { "$ref": "#/$defs/CalibrationBucket" } },
+        "autoMoveReady": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   }
 }
