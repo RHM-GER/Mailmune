@@ -54,6 +54,10 @@ func main() {
 			log.Printf("server stopped: %v", err)
 		}
 	}()
+	// Periodic UID reconciliation so new mail is detected without the user
+	// clicking; stopped cleanly on shutdown below.
+	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+	svc.StartScheduler(schedulerCtx)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
@@ -68,6 +72,8 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
+	stopScheduler()
+	svc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)

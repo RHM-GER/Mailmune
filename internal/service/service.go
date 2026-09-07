@@ -22,14 +22,15 @@ import (
 // together. All mail access is read-only unless an account was explicitly
 // taken out of dry run.
 type Service struct {
-	store   *store.SQLite
-	secrets secrets.Store
-	mailbox *mailbox.Client
-	rules   *classifier.Rules
-	ollama  *provider.Ollama
-	hub     *events.Hub
-	scanner *Scanner
-	mover   *Mover
+	store     *store.SQLite
+	secrets   secrets.Store
+	mailbox   *mailbox.Client
+	rules     *classifier.Rules
+	ollama    *provider.Ollama
+	hub       *events.Hub
+	scanner   *Scanner
+	mover     *Mover
+	scheduler *Scheduler
 }
 
 // SaveAccountRequest creates or updates an account. For idempotent creation
@@ -65,6 +66,7 @@ func NewWithMailbox(db *store.SQLite, secretStore secrets.Store, client *mailbox
 	}
 	service.scanner = newScanner(db, secretStore, client, service.rules, service.ollama, hub)
 	service.mover = newMover(service.scanner)
+	service.scheduler = newScheduler(service.scanner, db, hub, DefaultReconcileInterval)
 	if _, err := service.scanner.RecoverInterrupted(context.Background()); err != nil {
 		// The database is local and required; failing here means the agent
 		// cannot run anyway.
@@ -85,6 +87,22 @@ func NewForBaseline(db *store.SQLite) *Service {
 
 // Hub exposes the event stream used by the local API.
 func (s *Service) Hub() *events.Hub { return s.hub }
+
+// StartScheduler begins periodic UID reconciliation for all enabled accounts.
+// Production calls this once after startup; tests usually do not, so scanning
+// stays fully under test control.
+func (s *Service) StartScheduler(ctx context.Context) {
+	if s.scheduler != nil {
+		s.scheduler.Start(ctx)
+	}
+}
+
+// Close stops background scheduling. It is safe to call more than once.
+func (s *Service) Close() {
+	if s.scheduler != nil {
+		s.scheduler.Stop()
+	}
+}
 
 func (s *Service) Accounts(ctx context.Context) ([]domain.AccountConfig, error) {
 	return s.store.ListAccounts(ctx)
