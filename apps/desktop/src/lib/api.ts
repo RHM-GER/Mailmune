@@ -124,6 +124,70 @@ export function accounts(): Promise<Account[]> {
   return agentRequest<Account[]>("GET", "/v1/accounts")
 }
 
+export function models(): Promise<string[]> {
+  return agentRequest<string[]>("GET", "/v1/models")
+}
+
+export interface RecommendedModel {
+  tag: string
+  label: string
+  sizeClass: string
+  rationale: string
+  default: boolean
+}
+
+export function recommendedModels(): Promise<{ version: string; models: RecommendedModel[] }> {
+  return agentRequest<{ version: string; models: RecommendedModel[] }>("GET", "/v1/models/recommended")
+}
+
+export function setAccountModel(accountId: string, model: string): Promise<Account> {
+  return agentRequest<Account>("POST", `/v1/accounts/${accountId}/models`, { model })
+}
+
+export interface CapabilityCaseResult {
+  name: string
+  valid: boolean
+  expectedClass: string
+  classification?: string
+  error?: string
+}
+
+export interface CapabilityReport {
+  model: string
+  promptVersion: string
+  passed: boolean
+  cases: CapabilityCaseResult[]
+}
+
+export function validateAccountModel(accountId: string, model: string): Promise<{ report: CapabilityReport; account: Account }> {
+  return agentRequest<{ report: CapabilityReport; account: Account }>("POST", `/v1/accounts/${accountId}/models/validate`, { model })
+}
+
+export interface ThresholdMetric {
+  threshold: number
+  tp: number
+  fp: number
+  tn: number
+  fn: number
+  precision: number
+  recall: number
+  fpr: number
+}
+
+export interface CalibrationReport {
+  accountId: string
+  reviewed: number
+  confirmed: number
+  rejected: number
+  thresholds: ThresholdMetric[]
+  buckets: Array<{ lower: number; upper: number; count: number; meanScore: number; spamRate: number }>
+  autoMoveReady: boolean
+}
+
+export function calibration(accountId: string): Promise<CalibrationReport> {
+  return agentRequest<CalibrationReport>("GET", `/v1/accounts/${accountId}/calibration`)
+}
+
 /**
  * Abonniert den Agent-Eventstream (Scan-Fortschritt, neue Entscheidungen,
  * Kontostatus). Liefert eine Funktion zum Abbestellen. Außerhalb der

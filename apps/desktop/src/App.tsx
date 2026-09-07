@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, scanRuns, startScan } from "@/lib/api"
-import type { Account, AgentEvent, Decision, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, scanRuns, setAccountModel, startScan, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, CalibrationReport, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
 type Range = "week" | "month" | "year" | "all"
@@ -514,8 +514,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [accountStatus, setAccountStatus] = useState<Record<string, string>>({})
   const [hiddenAccounts, setHiddenAccounts] = useState<string[]>([])
   const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
-  const [fakeModelVisible, setFakeModelVisible] = useState(true)
-  const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true, "demo-qwen": true })
+  const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
@@ -597,8 +596,8 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.filter((account) => !hiddenAccounts.includes(account.id)).length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
-      <div data-section-id="settings-model"><ConnectionSection title="KI-Modelle" tooltip="Lokale KI-Modelle werden über Ollama verbunden. Sie bleiben auf diesem Gerät und können nach einem Fähigkeitstest für unklare E-Mails eingesetzt werden." count={fakeModelVisible ? 1 : 0} add={<Button size="icon-sm" aria-label="KI-Modell hinzufügen"><Plus /></Button>}>
-        {fakeModelVisible ? <ConnectionCard icon={Bot} title="Qwen3 4B" detail="Ollama · lokal verbunden" enabled={connectionEnabled["demo-qwen"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-qwen": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "model", id: "demo-qwen", label: "Qwen3 4B" })} /> : <EmptyConnectionCard text="Noch kein KI-Modell verbunden." />}
+      <div data-section-id="settings-model"><ConnectionSection title="KI-Modelle" tooltip="Lokale KI-Modelle werden über Ollama verbunden. Sie bleiben auf diesem Gerät und können nach einem Fähigkeitstest für unklare E-Mails eingesetzt werden." count={accounts.filter((item) => item.ollamaValidated).length} add={<span />}>
+        <ModelManager accounts={accounts} refresh={refresh} />
       </ConnectionSection></div>
       <div data-section-id="settings-security" className="flex gap-3 border-t border-white/[0.09] pt-6"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#999]" /><div><p className="text-sm font-medium">Sicherheit</p><p className="mt-1 text-xs leading-5 text-[#777]">Passwörter liegen im Betriebssystem-Schlüsselbund. Nachrichtentexte werden nicht dauerhaft gespeichert.</p></div></div>
     </section>
@@ -606,7 +605,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
     <SectionIndicator items={settingsSections} scrollRef={settingsScrollRef} />
     <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { setFolderName(folderDraft.trim()); setEditingFolder(false) }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
-    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; if (deleteTarget.kind === "model") setFakeModelVisible(false); else if (deleteTarget.id === "demo-strato") setFakeAccountVisible(false); else setHiddenAccounts((current) => [...current, deleteTarget.id]); setDeleteTarget(null) }} onCancel={() => setDeleteTarget(null)} />
+    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; if (deleteTarget.id === "demo-strato") setFakeAccountVisible(false); else setHiddenAccounts((current) => [...current, deleteTarget.id]); setDeleteTarget(null) }} onCancel={() => setDeleteTarget(null)} />
   </div>
 }
 
@@ -692,6 +691,127 @@ function CompactOnOff({ enabled, onChange, label }: { enabled: boolean; onChange
 
 function EmptyConnectionCard({ text }: { text: string }) {
   return <div className="flex min-h-20 items-center rounded-[10px] border border-dashed border-white/10 bg-white/[0.015] px-4 text-sm text-[#666]">{text}</div>
+}
+
+function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () => void }) {
+  const account = accounts[0]
+  const [installed, setInstalled] = useState<string[]>([])
+  const [recommended, setRecommended] = useState<RecommendedModel[]>([])
+  const [selected, setSelected] = useState<string>(account?.ollamaModel ?? "")
+  const [status, setStatus] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [ollamaError, setOllamaError] = useState("")
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [inst, rec] = await Promise.all([listModels(), recommendedModels()])
+        if (cancelled) return
+        setInstalled(inst ?? [])
+        setRecommended(rec.models ?? [])
+      } catch (error) {
+        if (!cancelled) setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (account?.ollamaModel) setSelected(account.ollamaModel)
+  }, [account?.ollamaModel])
+
+  useEffect(() => {
+    if (!selected && recommended.length > 0) {
+      const fallback = recommended.find((model) => model.default) ?? recommended[0]
+      setSelected(fallback.tag)
+    }
+  }, [recommended, selected])
+
+  if (!account) {
+    return <EmptyConnectionCard text="Zuerst ein Postfach verbinden; das KI-Modell wird pro Postfach aktiviert." />
+  }
+
+  const choose = async (tag: string) => {
+    setSelected(tag)
+    setBusy(true)
+    setStatus("Modell wird übernommen …")
+    try {
+      await setAccountModel(account.id, tag)
+      setStatus(`Übernommen: ${tag}. Jetzt den Fähigkeitstest ausführen, um es zu aktivieren.`)
+      await refresh()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Modellübernahme fehlgeschlagen")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const validate = async () => {
+    if (!selected) return
+    setBusy(true)
+    setStatus("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)")
+    try {
+      const result = await validateAccountModel(account.id, selected)
+      const invalid = result.report.cases.filter((item) => !item.valid).length
+      setStatus(result.report.passed
+        ? `Fähigkeitstest bestanden: ${selected} ist aktiviert und analysiert unklare Fälle mit.`
+        : `Fähigkeitstest fehlgeschlagen (${invalid} ungültige Antworten). Das Modell bleibt deaktiviert.`)
+      await refresh()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Fähigkeitstest fehlgeschlagen")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const validated = account.ollamaValidated && account.ollamaModel === selected
+  // Merge recommended + installed into one de-duplicated option list.
+  const options: Array<{ tag: string; label: string; detail: string; recommended: boolean }> = []
+  const seen = new Set<string>()
+  for (const model of recommended) {
+    if (seen.has(model.tag)) continue
+    seen.add(model.tag)
+    options.push({ tag: model.tag, label: model.label, detail: `${model.sizeClass} · empfohlen: ${model.rationale}`, recommended: true })
+  }
+  for (const tag of installed) {
+    if (seen.has(tag)) continue
+    seen.add(tag)
+    options.push({ tag, label: tag, detail: "lokal installiert", recommended: false })
+  }
+
+  return <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4">
+    <div className="flex items-center gap-3">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Bot className="size-4" /></div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{validated ? account.ollamaModel : selected || "Kein Modell gewählt"}</p>
+        <p className="mt-1 truncate text-xs text-[#666]">{validated ? "Ollama · lokal validiert" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · nicht verbunden"}</p>
+      </div>
+      {validated && <Badge className="shrink-0 border-white/10 bg-white/[0.06] text-[#8ad08a]">aktiv</Badge>}
+    </div>
+
+    {ollamaError && <p className="mt-3 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{ollamaError}</p>}
+
+    <div className="mt-3 space-y-2">
+      <Label htmlFor="model-select">Modell wählen</Label>
+      <Select value={selected} onValueChange={(value) => void choose(value)} disabled={busy}>
+        <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
+          <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {selected && <p className="text-xs leading-5 text-[#666]">{options.find((option) => option.tag === selected)?.detail}</p>}
+    </div>
+
+    <div className="mt-3 flex flex-wrap gap-2">
+      <Button size="sm" onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
+    </div>
+    {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
+    <p className="mt-3 text-xs leading-5 text-[#666]">Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p>
+  </div>
 }
 
 function AddAccount({ refresh }: { refresh: () => void }) {
