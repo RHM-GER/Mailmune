@@ -94,3 +94,50 @@ func TestResetClearsState(t *testing.T) {
 		t.Fatal("reset model must not score")
 	}
 }
+
+func TestMergedBoundsBaselineAsPrior(t *testing.T) {
+	// A large baseline and a tiny account model; the merge must not let the
+	// baseline's raw size dominate.
+	baseline := NewModel()
+	for i := 0; i < 1000; i++ {
+		baseline.Train(map[string]int{"basisspam": 3}, ClassSpam)
+		baseline.Train(map[string]int{"basisham": 3}, ClassHam)
+	}
+	account := NewModel()
+	account.Train(map[string]int{"kontotoken": 2}, ClassSpam)
+	account.Train(map[string]int{"kontoham": 2}, ClassHam)
+
+	weight := baseline.VirtualWeight(50) // baseline counts as ~50 examples
+	merged := account.Merged(baseline, weight)
+	if merged.Trained() >= baseline.Trained() {
+		t.Fatalf("merge did not bound the baseline: %d", merged.Trained())
+	}
+	if merged.Trained() < account.Trained()+40 || merged.Trained() > account.Trained()+60 {
+		t.Fatalf("baseline virtual contribution off: merged=%d account=%d", merged.Trained(), account.Trained())
+	}
+	// Both the baseline token and the account token survive the merge.
+	if merged.SpamCounts["basisspam"] == 0 || merged.SpamCounts["kontotoken"] == 0 {
+		t.Fatalf("merge lost tokens: %+v", merged.SpamCounts)
+	}
+	// Inputs are untouched.
+	if baseline.Trained() != 2000 || account.Trained() != 2 {
+		t.Fatal("merge mutated its inputs")
+	}
+}
+
+func TestMergedScoringStillSeparates(t *testing.T) {
+	baseline := NewModel()
+	for i := 0; i < 200; i++ {
+		baseline.Train(ExtractFeatures("gewinn lotterie", "", "", "gratis bonus klicken"), ClassSpam)
+		baseline.Train(ExtractFeatures("projekt meeting", "", "", "termin vertrag"), ClassHam)
+	}
+	merged := NewModel().Merged(baseline, baseline.VirtualWeight(100))
+	spamScore, ok := merged.Score(ExtractFeatures("gewinn", "", "", "gratis bonus"))
+	if !ok || spamScore < 0.6 {
+		t.Fatalf("merged spam score = %.2f ok=%v", spamScore, ok)
+	}
+	hamScore, _ := merged.Score(ExtractFeatures("projekt", "", "", "termin vertrag"))
+	if hamScore > 0.4 {
+		t.Fatalf("merged ham score = %.2f", hamScore)
+	}
+}

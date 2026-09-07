@@ -175,6 +175,51 @@ func (m *Model) Reset() {
 	m.SpamMessages, m.HamMessages = 0, 0
 }
 
+// Merged returns a new model combining m (weight 1) with other scaled by
+// otherWeight. Scaling lets a large imported baseline act as a bounded prior
+// that the user's confirmed learning can still outweigh; it never mutates
+// either input.
+func (m *Model) Merged(other *Model, otherWeight float64) *Model {
+	out := NewModel()
+	addScaledCounts(out, m, 1.0)
+	addScaledCounts(out, other, otherWeight)
+	return out
+}
+
+// VirtualWeight returns the merge weight that makes the model contribute
+// approximately targetMessages examples, preserving its class proportions.
+// A huge corpus and a tiny one then influence scoring comparably.
+func (m *Model) VirtualWeight(targetMessages uint64) float64 {
+	trained := m.Trained()
+	if trained == 0 || targetMessages == 0 {
+		return 0
+	}
+	return float64(targetMessages) / float64(trained)
+}
+
+func addScaledCounts(dst *Model, src *Model, weight float64) {
+	if src == nil || weight <= 0 {
+		return
+	}
+	for token, count := range src.SpamCounts {
+		dst.SpamCounts[token] += scaleCount(count, weight)
+	}
+	for token, count := range src.HamCounts {
+		dst.HamCounts[token] += scaleCount(count, weight)
+	}
+	dst.SpamTokens += scaleCount(src.SpamTokens, weight)
+	dst.HamTokens += scaleCount(src.HamTokens, weight)
+	dst.SpamMessages += scaleCount(src.SpamMessages, weight)
+	dst.HamMessages += scaleCount(src.HamMessages, weight)
+}
+
+func scaleCount(value uint64, weight float64) uint64 {
+	if weight <= 0 || value == 0 {
+		return 0
+	}
+	return uint64(math.Round(float64(value) * weight))
+}
+
 // ExtractFeatures turns the metadata and bounded text of a message into a
 // reproducible token histogram. It never stores raw text: only normalized,
 // length-bounded tokens and a small number of structured markers survive.

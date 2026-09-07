@@ -115,6 +115,33 @@ var migrations = []migration{
 			`ALTER TABLE decisions ADD COLUMN trained_at TEXT`,
 		},
 	},
+	{
+		id:   4,
+		name: "learning_baseline",
+		stmts: []string{
+			// Optional, opt-in global baseline imported from an external corpus
+			// (e.g. an MIT-licensed dataset). It is stored separately from the
+			// per-account confirmed learning, carries provenance, and can be
+			// deleted without touching user-confirmed knowledge.
+			`CREATE TABLE IF NOT EXISTS learning_baselines (
+ id TEXT PRIMARY KEY,
+ version INTEGER NOT NULL,
+ source TEXT NOT NULL,
+ license TEXT NOT NULL,
+ corpus_rows INTEGER NOT NULL DEFAULT 0,
+ spam_messages INTEGER NOT NULL DEFAULT 0,
+ ham_messages INTEGER NOT NULL DEFAULT 0,
+ imported_at TEXT NOT NULL
+)`,
+			`CREATE TABLE IF NOT EXISTS learning_baseline_features (
+ baseline_id TEXT NOT NULL REFERENCES learning_baselines(id) ON DELETE CASCADE,
+ token TEXT NOT NULL,
+ spam_count INTEGER NOT NULL DEFAULT 0,
+ ham_count INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(baseline_id, token)
+)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

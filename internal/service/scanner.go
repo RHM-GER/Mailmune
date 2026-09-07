@@ -175,6 +175,37 @@ type scanResult struct {
 	warnings   []string
 }
 
+// baselineVirtualMessages bounds how strongly an imported global baseline may
+// influence scoring, regardless of its raw size. It is expressed as a virtual
+// count of confirmed examples so a huge corpus never drowns out the user's own
+// confirmed learning.
+const baselineVirtualMessages = 150
+
+// buildScorer merges the per-account learner with the optional global
+// baseline. Either part may be absent; nil is returned when there is nothing
+// to score with.
+func (s *Scanner) buildScorer(ctx context.Context, accountID string) *learning.Model {
+	accountModel, accountErr := s.store.LoadLearningModel(ctx, accountID)
+	if accountErr != nil {
+		accountModel = nil
+	}
+	baselineModel, _, baselineOK, baselineErr := s.store.LoadBaseline(ctx, "global")
+	if baselineErr != nil || !baselineOK {
+		baselineModel = nil
+	}
+	switch {
+	case accountModel != nil && baselineModel != nil:
+		return accountModel.Merged(baselineModel, baselineModel.VirtualWeight(baselineVirtualMessages))
+	case accountModel != nil:
+		return accountModel
+	case baselineModel != nil:
+		// A baseline alone is a prior; expose it at its bounded virtual size.
+		return learning.NewModel().Merged(baselineModel, baselineModel.VirtualWeight(baselineVirtualMessages))
+	default:
+		return nil
+	}
+}
+
 func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun) scanResult {
 	result := scanResult{}
 	folder := account.InboxFolder
@@ -204,11 +235,14 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// Note: the bounded 90-day first pass belongs to the profiling feature
 	// (Phase 4). Regular scans read up to MaxMessages newest messages.
 
-	// Load the per-account statistical learner once per run. A missing or
+	// Load the statistical learner once per run: the per-account model from
+	// confirmed reviews, merged with the optional global baseline imported
+	// from an external corpus. The baseline acts as a bounded prior so the
+	// user's own confirmed learning can still outweigh it. A missing or
 	// broken model never blocks scanning.
 	var scorer classifier.StatisticalScorer
-	if model, loadErr := s.store.LoadLearningModel(ctx, account.ID); loadErr == nil && model != nil && model.Trained() >= minLearningSamples {
-		scorer = model
+	if combined := s.buildScorer(ctx, account.ID); combined != nil && combined.Trained() >= minLearningSamples {
+		scorer = combined
 	}
 
 	handler := func(message domain.MessageFeatures, text string) error {

@@ -71,6 +71,13 @@ func NewWithMailbox(db *store.SQLite, secretStore secrets.Store, client *mailbox
 	return service
 }
 
+// NewForBaseline builds a minimal service for offline baseline management
+// (import/list/delete). It needs no IMAP client, keyring or scanner and is
+// used by the mltool CLI against the agent's database.
+func NewForBaseline(db *store.SQLite) *Service {
+	return &Service{store: db, hub: events.NewHub()}
+}
+
 // Hub exposes the event stream used by the local API.
 func (s *Service) Hub() *events.Hub { return s.hub }
 
