@@ -140,8 +140,67 @@
       "additionalProperties": false
     },
     "EventStream": {
-      "description": "SSE-Ereignisse unter GET /v1/events. Ereignistypen: ready, heartbeat, scan.started, scan.progress, scan.finished, account.updated.",
+      "description": "SSE-Ereignisse unter GET /v1/events. Ereignistypen: ready, heartbeat, scan.started, scan.progress, scan.finished, account.updated, model.validated, baseline.updated, baseline.deleted.",
       "type": "string"
+    },
+    "RecommendedModel": {
+      "type": "object",
+      "required": ["tag", "label", "sizeClass", "rationale", "default"],
+      "properties": {
+        "tag": { "type": "string" },
+        "label": { "type": "string" },
+        "sizeClass": { "type": "string" },
+        "rationale": { "type": "string" },
+        "default": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ModelRecommendations": {
+      "type": "object",
+      "required": ["version", "models"],
+      "properties": {
+        "version": { "type": "string" },
+        "models": { "type": "array", "items": { "$ref": "#/$defs/RecommendedModel" } }
+      },
+      "additionalProperties": false
+    },
+    "CapabilityReport": {
+      "type": "object",
+      "required": ["model", "promptVersion", "passed", "cases"],
+      "properties": {
+        "model": { "type": "string" },
+        "promptVersion": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "valid", "expectedClass"],
+            "properties": {
+              "name": { "type": "string" },
+              "valid": { "type": "boolean" },
+              "expectedClass": { "type": "string" },
+              "classification": { "type": "string" },
+              "error": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "LearningBaseline": {
+      "type": "object",
+      "required": ["id", "version", "source", "license", "corpusRows", "spamMessages", "hamMessages", "importedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer" },
+        "source": { "type": "string", "description": "Herkunft des Korpus (Name/URL) – dokumentierte Pflichtangabe." },
+        "license": { "type": "string", "description": "Lizenz des Korpus, z. B. MIT." },
+        "corpusRows": { "type": "integer", "minimum": 0 },
+        "spamMessages": { "type": "integer", "minimum": 0 },
+        "hamMessages": { "type": "integer", "minimum": 0 },
+        "importedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
     }
   }
 }

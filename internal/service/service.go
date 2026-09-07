@@ -257,6 +257,61 @@ func (s *Service) CapabilityTest(ctx context.Context, model string) (provider.Ca
 	return s.ollama.RunCapabilityTest(ctx, model)
 }
 
+// RecommendedModels returns the versioned local-model recommendations plus
+// the recommendation set version, so the UI can offer measurable, consistent
+// choices without assuming any model is installed.
+func (s *Service) RecommendedModels() (string, []provider.RecommendedModel) {
+	return provider.RecommendationVersion(), provider.RecommendedModels()
+}
+
+// SetAccountModel selects a local model for an account and clears any prior
+// validation, because a different model must pass the capability test again
+// before it may contribute evidence. It never changes confirmed learning.
+func (s *Service) SetAccountModel(ctx context.Context, accountID, model string) (domain.AccountConfig, error) {
+	account, err := s.store.Account(ctx, accountID)
+	if err != nil {
+		return domain.AccountConfig{}, err
+	}
+	account.OllamaModel = model
+	account.OllamaValidated = false
+	account.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpsertAccount(ctx, account); err != nil {
+		return domain.AccountConfig{}, err
+	}
+	if s.hub != nil {
+		s.hub.Publish("account.updated", account)
+	}
+	return account, nil
+}
+
+// ValidateAccountModel runs the capability test for a model and, only when it
+// passes, marks the account's model as validated so it may contribute a single
+// evidence group during scans. A failed test leaves validation cleared.
+func (s *Service) ValidateAccountModel(ctx context.Context, accountID, model string) (provider.CapabilityReport, domain.AccountConfig, error) {
+	account, err := s.store.Account(ctx, accountID)
+	if err != nil {
+		return provider.CapabilityReport{}, domain.AccountConfig{}, err
+	}
+	if model == "" {
+		model = account.OllamaModel
+	}
+	report, err := s.ollama.RunCapabilityTest(ctx, model)
+	if err != nil {
+		return provider.CapabilityReport{}, account, err
+	}
+	account.OllamaModel = model
+	account.OllamaValidated = report.Passed
+	account.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpsertAccount(ctx, account); err != nil {
+		return report, account, err
+	}
+	if s.hub != nil {
+		s.hub.Publish("account.updated", account)
+		s.hub.Publish("model.validated", map[string]any{"accountId": accountID, "model": model, "passed": report.Passed})
+	}
+	return report, account, nil
+}
+
 func (s *Service) Purge(ctx context.Context) (int64, error) {
 	return s.store.PurgeReadableMetadata(ctx, time.Now().AddDate(0, 0, -180))
 }

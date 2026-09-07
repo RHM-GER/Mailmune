@@ -260,9 +260,49 @@ func (o *Ollama) RunCapabilityTest(ctx context.Context, model string) (Capabilit
 			}
 		}
 		report.Cases = append(report.Cases, result)
+		}
+		return report, nil
 	}
-	return report, nil
-}
+
+	// recommendationVersion pins the recommendation set. Changing recommendations
+	// must never auto-switch a working production model; it only informs new
+	// selections and re-benchmarks.
+	const recommendationVersion = "2026-09"
+
+	// RecommendedModel is one entry of the versioned recommendation list.
+	type RecommendedModel struct {
+		Tag        string `json:"tag"`
+		Label      string `json:"label"`
+		SizeClass  string `json:"sizeClass"`
+		Rationale  string `json:"rationale"`
+		Default    bool   `json:"default"`
+	}
+
+	// RecommendedModels returns the versioned recommendation list. These are
+	// small, local instruct models suited to strict-JSON spam triage on a 16 GB
+	// laptop; results stay measurable because the same tags and the same prompt
+	// version are used. Availability is checked against the local Ollama at
+	// runtime, never assumed.
+	func RecommendedModels() []RecommendedModel {
+		return []RecommendedModel{
+			{Tag: "qwen3:4b-instruct-2507", Label: "Qwen3 4B Instruct", SizeClass: "~4B", Rationale: "Ausgewogen für Deutsch+Englisch, zuverlässiges JSON, läuft flüssig auf 16 GB.", Default: true},
+			{Tag: "llama3.2:3b-instruct", Label: "Llama 3.2 3B Instruct", SizeClass: "~3B", Rationale: "Schnell, solide Strukturtreue; gute Alternative bei wenig VRAM.", Default: false},
+			{Tag: "gemma2:2b-instruct", Label: "Gemma 2 2B Instruct", SizeClass: "~2B", Rationale: "Sehr leicht; für schwächere Geräte, etwas weniger nuanciert.", Default: false},
+		}
+	}
+
+	// RecommendationVersion exposes the pinned recommendation set version.
+	func RecommendationVersion() string { return recommendationVersion }
+
+	// DefaultRecommendedModel returns the default recommendation tag.
+	func DefaultRecommendedModel() string {
+		for _, model := range RecommendedModels() {
+			if model.Default {
+				return model.Tag
+			}
+		}
+		return ""
+	}
 
 func bounded(value string, limit int) string {
 	runes := []rune(value)

@@ -52,7 +52,10 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("GET /v1/decisions", s.decisions)
 	mux.HandleFunc("POST /v1/reviews", s.review)
 	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("GET /v1/models/recommended", s.recommendedModels)
 	mux.HandleFunc("POST /v1/models/capability", s.capabilityTest)
+	mux.HandleFunc("POST /v1/accounts/{id}/models", s.setAccountModel)
+	mux.HandleFunc("POST /v1/accounts/{id}/models/validate", s.validateAccountModel)
 	mux.HandleFunc("GET /v1/events", s.events)
 	// The event stream must never be cut off by the global write timeout.
 	s.http = &http.Server{Handler: s.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
@@ -190,6 +193,41 @@ func (s *Server) capabilityTest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	value, err := s.service.CapabilityTest(ctx, req.Model)
 	respond(w, "capability_test_failed", value, err)
+}
+func (s *Server) recommendedModels(w http.ResponseWriter, r *http.Request) {
+	version, models := s.service.RecommendedModels()
+	writeJSON(w, http.StatusOK, map[string]any{"version": version, "models": models})
+}
+func (s *Server) setAccountModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err)
+		return
+	}
+	value, err := s.service.SetAccountModel(r.Context(), r.PathValue("id"), req.Model)
+	respond(w, "set_model_failed", value, err)
+}
+func (s *Server) validateAccountModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Model string `json:"model"`
+	}
+	// The model is optional; an empty body validates the account's stored model.
+	if r.ContentLength > 0 {
+		if err := decode(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err)
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	report, account, err := s.service.ValidateAccountModel(ctx, r.PathValue("id"), req.Model)
+	if err != nil {
+		writeError(w, statusFor(err), "validate_model_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report": report, "account": account})
 }
 
 // events streams agent events as server-sent events: scan lifecycle,
