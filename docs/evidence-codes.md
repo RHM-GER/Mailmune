@@ -17,7 +17,13 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `rules` | `deny_keyword` | Spam | Gesperrtes Schlüsselwort in Betreff oder Text |
 | `authentication` | `auth_pass` | Ham | Plausible SPF/DKIM/DMARC-Pass-Hinweise (untrusted Input, nur schwaches Signal) |
 | `authentication` | `auth_fail` | Spam | SPF/DKIM/DMARC-Fail-Hinweise (untrusted Input) |
-| `content` | `pressure_language` | Spam | Typische Druck- oder Lockformulierungen |
+| `content` | `pressure_language` | Spam | Druck- oder Drohformulierung (sofort handeln, Sperrung, letzte Warnung …) |
+| `content` | `reward_bait` | Spam | Lockangebot (Gewinn, Geschenk, Bonus, „Sie gehören zu den …“) |
+| `content` | `verification_request` | Spam | Aufforderung, Identität/Zugangsdaten zu bestätigen oder zu aktualisieren |
+| `content` | `financial_pressure` | Spam | Finanzielle Druckformulierung (offene Zahlung, Mahnung, Inkasso) |
+| `content` | `subject_anomaly` | Spam | Auffällige Zeichensetzung (`!!`) oder Blockschrift im Betreff |
+| `sender_integrity` | `sender_digit_pattern` | Spam | Absenderdomain mit langen Ziffernfolgen (≥ 4) – maschinell erzeugt |
+| `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |

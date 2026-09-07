@@ -106,3 +106,67 @@ func TestBaselineWithoutSignalsStaysBelowThreshold(t *testing.T) {
 		t.Fatalf("neutral message produced evidence: %+v", result.Evidence)
 	}
 }
+
+func TestMachineGeneratedDomainsAreFlagged(t *testing.T) {
+	for _, malicious := range []string{
+		"stratorechnung8758016.de",
+		"barclaysgermany13903.com",
+		"dietechnikergermanyd960061.de",
+		"amazonsurveygermany51013.com",
+		"foodboxlidldeutsch11.de",
+	} {
+		if !machineGeneratedLabel(malicious) && !digitRun.MatchString(malicious) {
+			t.Fatalf("machine-generated domain not flagged: %s", malicious)
+		}
+	}
+}
+
+func TestNormalDomainsAreNotFlagged(t *testing.T) {
+	// Pronounceable personal/company domains must never be flagged, even
+	// when long. This protects real correspondents from false positives.
+	for _, legitimate := range []string{
+		"roberthoffmannmedia.de",
+		"j-obst.de",
+		"griesberger.de",
+		"example.com",
+		"deutsche-bank.de",
+	} {
+		if machineGeneratedLabel(legitimate) {
+			t.Fatalf("legitimate domain flagged as machine-generated: %s", legitimate)
+		}
+		if digitRun.MatchString(legitimate) {
+			t.Fatalf("legitimate domain flagged for digit run: %s", legitimate)
+		}
+	}
+}
+
+func TestPhishingWaveReachesReviewThreshold(t *testing.T) {
+	rules := NewRules()
+	msg := domain.MessageFeatures{
+		From: "noreply@barclaysgermany13903.com", FromDomain: "barclaysgermany13903.com",
+		Subject: "Bestätigen Sie Ihre Identität zur Vermeidung einer Sperre!!",
+		Text:    "Bitte bestätigen Sie jetzt Ihre Identität, sonst wird Ihr Konto gesperrt.",
+	}
+	result := rules.Classify(msg, domain.MailboxProfile{})
+	if result.Score < CandidateThreshold {
+		t.Fatalf("phishing mail scored %.2f, want >= %.2f", result.Score, CandidateThreshold)
+	}
+	if result.IndependentGroups < 2 {
+		t.Fatalf("phishing mail needs >= 2 independent groups, got %d", result.IndependentGroups)
+	}
+	if findEvidence(result.Evidence, CodeSenderDigitPattern) == nil || findEvidence(result.Evidence, CodeVerificationRequest) == nil {
+		t.Fatalf("expected sender + verification evidence: %+v", result.Evidence)
+	}
+}
+
+func TestKnownCorrespondentNeverFlaggedDespiteOddDomain(t *testing.T) {
+	rules := NewRules()
+	msg := domain.MessageFeatures{From: "chef@firma12345.de", FromDomain: "firma12345.de", Subject: "Termin", KnownCorrespondent: true}
+	result := rules.Classify(msg, domain.MailboxProfile{})
+	if !result.StrongTrustSignal {
+		t.Fatal("known correspondent must create a trust signal")
+	}
+	if Decide(domain.SafetySafe, result) == ActionMove {
+		t.Fatal("known correspondent must never be moved automatically")
+	}
+}

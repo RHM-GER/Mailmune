@@ -181,7 +181,13 @@ func (m *Client) consumeFetch(ctx context.Context, client *imapclient.Client, cm
 		features := buildFeatures(account, folder, uidValidity, fetched)
 		var text string
 		if opts.FetchText {
-			text = m.fetchText(client, fetched, opts.TextLimit)
+			var urlCount int
+			text, urlCount = m.fetchText(client, fetched, opts.TextLimit)
+			// URL counts are taken from the raw MIME part before any
+			// HTML-to-text conversion strips link targets.
+			if urlCount > features.URLCount {
+				features.URLCount = urlCount
+			}
 		}
 		if err := handler(features, text); err != nil {
 			return outcome, err
@@ -295,11 +301,12 @@ func buildFeatures(account domain.AccountConfig, folder string, uidValidity uint
 	return features
 }
 
-// fetchText loads a bounded plain-text representation of the message body.
-// It prefers the first text/plain part, falls back to text/html converted
-// offline, and finally to BODY[TEXT]. Nothing is resolved or fetched from
-// external sources, and the caller must not retain the result.
-func (m *Client) fetchText(client *imapclient.Client, fetched *fetchedMessage, limit int64) string {
+// fetchText loads a bounded plain-text representation of the message body
+// and counts URLs in the raw MIME part. It prefers the first text/plain
+// part, falls back to text/html converted offline, and finally to
+// BODY[TEXT]. Nothing is resolved or fetched from external sources, and the
+// caller must not retain the result.
+func (m *Client) fetchText(client *imapclient.Client, fetched *fetchedMessage, limit int64) (string, int) {
 	if limit <= 0 || limit > defaultTextLimit {
 		limit = defaultTextLimit
 	}
@@ -338,20 +345,29 @@ func (m *Client) fetchText(client *imapclient.Client, fetched *fetchedMessage, l
 		section = &imap.FetchItemBodySection{Specifier: imap.PartSpecifierText, Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: limit}}
 	}
 	cmd := client.Fetch(imap.UIDSetNum(fetched.uid), &imap.FetchOptions{BodySection: []*imap.FetchItemBodySection{section}})
-	text := drainTextFetch(cmd, section, limit)
+	text, raw := drainTextFetch(cmd, section, limit)
+	urlCount := countRawURLs(raw)
 	if media == "text/html" {
-		return HTMLToText(text)
+		return HTMLToText(text), urlCount
 	}
-	return text
+	return text, urlCount
 }
 
-func drainTextFetch(cmd *imapclient.FetchCommand, section *imap.FetchItemBodySection, limit int64) string {
+func countRawURLs(raw []byte) int {
+	lower := strings.ToLower(string(raw))
+	if len(lower) > 64<<10 {
+		lower = lower[:64<<10]
+	}
+	return strings.Count(lower, "http://") + strings.Count(lower, "https://")
+}
+
+func drainTextFetch(cmd *imapclient.FetchCommand, section *imap.FetchItemBodySection, limit int64) (string, []byte) {
 	defer cmd.Close()
 	message := cmd.Next()
 	if message == nil {
-		return ""
+		return "", nil
 	}
-	var text []byte
+	var text, raw []byte
 	for {
 		item := message.Next()
 		if item == nil {
@@ -364,14 +380,20 @@ func drainTextFetch(cmd *imapclient.FetchCommand, section *imap.FetchItemBodySec
 		if !value.MatchCommand(section) {
 			// Drain unexpected sections completely so the stream can proceed.
 			if _, err := io.Copy(io.Discard, value.Literal); err != nil {
-				return ""
+				return "", nil
 			}
 			continue
 		}
-		data, err := readLiteralBounded(value.Literal, limit+1024)
+		// Keep the truncated prefix instead of discarding it: partial text
+		// still yields tokens and URL counts.
+		data, err := io.ReadAll(io.LimitReader(value.Literal, limit+1024))
 		if err == nil {
+			if int64(len(data)) >= limit+1024 {
+				_, _ = io.Copy(io.Discard, value.Literal)
+			}
 			text = data
+			raw = data
 		}
 	}
-	return string(text)
+	return string(text), raw
 }

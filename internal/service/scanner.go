@@ -215,6 +215,12 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		if s.testGate != nil {
 			s.testGate()
 		}
+		// Text-based rules need the bounded body text; it is discarded after
+		// classification and never persisted.
+		message.Text = text
+		if message.URLCount == 0 {
+			message.URLCount = classifier.CountURLs(text)
+		}
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
 		s.consultModel(ctx, account, message, &classification)
