@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
 import { agentRequest, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, scanRuns, startScan } from "@/lib/api"
-import type { Account, Decision, SafetyMode, Summary } from "@/lib/api"
+import type { Account, AgentEvent, Decision, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
 type Range = "week" | "month" | "year" | "all"
@@ -98,6 +98,8 @@ export default function App() {
   const [decisions, setDecisions] = useState<Decision[]>(isTauri() ? [] : demoDecisions)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [agentOnline, setAgentOnline] = useState(!isTauri())
+  const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number } | null>(null)
+  const scanNoticeTimer = useRef<number | undefined>(undefined)
   const [compactNav, setCompactNav] = useState(false)
   const narrowApp = useMediaQuery("(max-width: 890px)")
   const effectiveCompactNav = narrowApp || compactNav
@@ -124,9 +126,22 @@ export default function App() {
     const initial = window.setTimeout(() => void refresh(), 0)
     const retry = window.setTimeout(() => void refresh(), 1200)
     const poll = window.setInterval(() => void refresh(), 15000)
+    const handleEvent = (event: AgentEvent) => {
+      if (event.type === "scan.started" || event.type === "scan.progress") {
+        const data = event.data as ScanEvent
+        window.clearTimeout(scanNoticeTimer.current)
+        setScanNotice({ run: data.run })
+      } else if (event.type === "scan.finished") {
+        const data = event.data as ScanEvent
+        setScanNotice({ run: data.run, candidates: data.candidates })
+        window.clearTimeout(scanNoticeTimer.current)
+        scanNoticeTimer.current = window.setTimeout(() => setScanNotice(null), 8000)
+      }
+      void refresh()
+    }
     let stopEvents: (() => void) | undefined
     let disposed = false
-    void listenAgentEvents(() => void refresh()).then((stop) => {
+    void listenAgentEvents(handleEvent).then((stop) => {
       if (disposed) stop()
       else stopEvents = stop
     })
@@ -134,6 +149,7 @@ export default function App() {
       disposed = true
       window.clearTimeout(initial)
       window.clearTimeout(retry)
+      window.clearTimeout(scanNoticeTimer.current)
       window.clearInterval(poll)
       stopEvents?.()
     }
@@ -155,9 +171,36 @@ export default function App() {
           </div>
           {page !== "review" && page !== "settings" && <ScrollFade strength={mainFade} targetRef={mainScrollRef} />}
         </main>
+        {scanNotice && <ScanToast notice={scanNotice} />}
       </div>
     </TooltipProvider>
   )
+}
+
+function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: number } }) {
+  const finished = notice.run.status !== "running"
+  const indicator = notice.run.status === "failed" || notice.run.status === "interrupted" ? "#e5484d" : notice.run.status === "cancelled" ? "#f5a524" : finished ? "#46a758" : "#39c2d7"
+  const title = finished
+    ? notice.run.status === "completed" ? "Prüfung abgeschlossen"
+      : notice.run.status === "cancelled" ? "Prüfung abgebrochen"
+      : "Prüfung fehlgeschlagen"
+    : "Postfach wird geprüft …"
+  const detail = finished
+    ? notice.run.status === "completed"
+      ? `${notice.run.processed} Nachrichten geprüft · ${notice.candidates ?? 0} Verdachtsfälle · nichts verschoben`
+      : notice.run.error || "Der Lauf wurde nicht abgeschlossen."
+    : notice.run.estimatedTotal > 0
+      ? `${notice.run.processed} von etwa ${notice.run.estimatedTotal} Nachrichten gelesen`
+      : `${notice.run.processed} Nachrichten gelesen`
+  return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
+    <div role="status" className="flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
+      <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${finished ? "" : "animate-pulse"}`} style={{ background: indicator }} />
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-[#888]">{detail}</p>
+      </div>
+    </div>
+  </div>
 }
 
 function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending }: { page: Page; onPage: (page: Page) => void; compact: boolean; compactLocked: boolean; onCompact: () => void; pending: number }) {
@@ -248,15 +291,18 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
   const tableHorizontalFade = useScrollFade(tableScrollRef, "horizontal")
   const toolbarScrollRef = useRef<HTMLDivElement>(null)
   const toolbarFade = useScrollFade(toolbarScrollRef, "horizontal")
-  const [view, setView] = useState<"review" | "spam">("review")
-  const [reviewFilter, setReviewFilter] = useState<"review" | "rejected">("review")
-  const [range, setRange] = useState<Range>("week")
+  const [view, setView] = useState<"review" | "spam">(() => (readStoredValue("mailmune.reviewView", "spamalytic.reviewView", "review") as "review" | "spam"))
+  const [reviewFilter, setReviewFilter] = useState<"review" | "rejected">(() => (readStoredValue("mailmune.reviewFilter", "spamalytic.reviewFilter", "review") as "review" | "rejected"))
+  const [range, setRange] = useState<Range>(() => (readStoredValue("mailmune.reviewRange", "spamalytic.reviewRange", "week") as Range))
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [referenceTime] = useState(() => Date.now())
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "receivedAt", direction: "desc" })
   const filtersActive = range !== "week" || (view === "review" && reviewFilter !== "review")
+  useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
+  useEffect(() => { localStorage.setItem("mailmune.reviewFilter", reviewFilter) }, [reviewFilter])
+  useEffect(() => { localStorage.setItem("mailmune.reviewRange", range) }, [range])
   const resetFilters = () => { setRange("week"); setReviewFilter("review"); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
@@ -509,6 +555,18 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
       setAccountStatus((current) => ({ ...current, [account.id]: error instanceof Error ? error.message : "Aktion fehlgeschlagen" }))
     }
   }
+  const persistSafetyMode = async (nextMode: SafetyMode) => {
+    setMode(nextMode)
+    const account = accounts.find((item) => !hiddenAccounts.includes(item.id)) ?? accounts[0]
+    if (!account) return
+    try {
+      // Sicherheitsmodus gehört zum Konto und wird serverseitig persistiert.
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, safetyMode: nextMode } })
+      await refresh()
+    } catch {
+      // Ohne Agent bleibt die lokale Auswahl erhalten.
+    }
+  }
   const settingsSections = [
     { id: "settings-app", label: "App-Einstellungen" }, { id: "settings-filter", label: "Filterverhalten" }, { id: "settings-folder", label: "Ordner" },
     { id: "settings-scan", label: "Automatische Prüfung" }, { id: "settings-account", label: "Postfach" }, { id: "settings-model", label: "KI-Modell" }, { id: "settings-security", label: "Sicherheit" },
@@ -522,7 +580,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
     <div className="mb-6 mt-14"><h2 className="text-base font-medium">Profilkonfiguration</h2><p className="mt-1 text-xs text-[#666]">Diese Einstellungen gelten nur für das aktuell ausgewählte Postfach.</p></div>
     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,612px)_minmax(0,1fr)] xl:gap-16">
     <section data-section-id="settings-filter" className="min-w-0">
-      <SafetySlider mode={mode} setMode={(nextMode) => { setMode(nextMode); if (nextMode === "safe" && automaticThreshold < 90) { setAutomaticThreshold(90); localStorage.setItem("mailmune.automaticSpamThreshold.v2", "90") } }} />
+      <SafetySlider mode={mode} setMode={(nextMode) => { void persistSafetyMode(nextMode); if (nextMode === "safe" && automaticThreshold < 90) { setAutomaticThreshold(90); localStorage.setItem("mailmune.automaticSpamThreshold.v2", "90") } }} />
       {mode !== "confirm_all" && <div className="mt-6"><AutomaticSpamThreshold value={automaticThreshold} onChange={(value) => { setAutomaticThreshold(value); localStorage.setItem("mailmune.automaticSpamThreshold.v2", String(value)); if (value < 90) setMode("aggressive") }} /></div>}
       <div className="mt-6"><NotificationStrength value={notificationThreshold} onChange={(value) => { setNotificationThreshold(value); localStorage.setItem("mailmune.notificationThreshold", String(value)) }} /></div>
       <div className="my-6 border-t border-white/[0.09]" />
