@@ -519,14 +519,14 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
-  const runAccountAction = async (account: Account, action: "test" | "scan") => {
-    setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : "Trockenlauf wird gestartet …" }))
+  const runAccountAction = async (account: Account, action: "test" | "scan" | "resync") => {
+    setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : action === "resync" ? "Postfach wird komplett neu geprüft …" : "Trockenlauf wird gestartet …" }))
     try {
       if (action === "test") {
         const result = await agentRequest<{ supportsIdle: boolean; supportsMove: boolean; folders: string[] }>("POST", `/v1/accounts/${account.id}/test`)
         setAccountStatus((current) => ({ ...current, [account.id]: `Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}` }))
       } else {
-        const run = await startScan(account.id)
+        const run = await startScan(account.id, action === "resync")
         // Der Lauf arbeitet im Agent-Hintergrund; die UI folgt dem
         // Fortschritt über den Scan-Status und den Eventstream.
         for (let attempt = 0; attempt < 300; attempt++) {
@@ -593,7 +593,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.filter((account) => !hiddenAccounts.includes(account.id)).length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>
-        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}</ConnectionCard>)}
+        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}</ConnectionCard>)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.filter((account) => !hiddenAccounts.includes(account.id)).length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
