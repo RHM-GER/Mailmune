@@ -380,17 +380,22 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
   const toolbarFade = useScrollFade(toolbarScrollRef, "horizontal")
   const [view, setView] = useState<"review" | "spam">(() => (readStoredValue("mailmune.reviewView", "spamalytic.reviewView", "review") as "review" | "spam"))
   const [reviewFilter, setReviewFilter] = useState<"review" | "rejected">(() => (readStoredValue("mailmune.reviewFilter", "spamalytic.reviewFilter", "review") as "review" | "rejected"))
-  const [range, setRange] = useState<Range>(() => (readStoredValue("mailmune.reviewRange", "spamalytic.reviewRange", "week") as Range))
+  // Default to "all": a first scan of an older mailbox surfaces many pending
+  // decisions whose receivedAt is far in the past. A narrow default (e.g.
+  // "week") would hide them and look like data loss, so the review backlog is
+  // shown in full unless the user explicitly narrows it. The v2 key resets the
+  // previous "week" default for existing installs.
+  const [range, setRange] = useState<Range>(() => (readStoredValue("mailmune.reviewRange.v2", "spamalytic.reviewRange", "all") as Range))
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [referenceTime] = useState(() => Date.now())
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "receivedAt", direction: "desc" })
-  const filtersActive = range !== "week" || (view === "review" && reviewFilter !== "review")
+  const filtersActive = range !== "all" || (view === "review" && reviewFilter !== "review")
   useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
   useEffect(() => { localStorage.setItem("mailmune.reviewFilter", reviewFilter) }, [reviewFilter])
-  useEffect(() => { localStorage.setItem("mailmune.reviewRange", range) }, [range])
-  const resetFilters = () => { setRange("week"); setReviewFilter("review"); setSelected([]) }
+  useEffect(() => { localStorage.setItem("mailmune.reviewRange.v2", range) }, [range])
+  const resetFilters = () => { setRange("all"); setReviewFilter("review"); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
     return decisions.filter((item) => item.score >= 0.6 && (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && referenceTime - new Date(item.receivedAt).getTime() <= days * 86_400_000 && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
@@ -418,7 +423,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
         <div className="flex shrink-0 items-center">
           <FilterToolbarButton active={filtersActive} open={filterOpen} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
-          {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => setRange(value as Range)}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "week" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem></SelectContent></Select></>}
+          {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => setRange(value as Range)}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem></SelectContent></Select></>}
         </div>
       </div><ScrollFade strength={toolbarFade} direction="horizontal" compact targetRef={toolbarScrollRef} /></div>
       <div className="relative mt-6 min-h-0 flex-1">
