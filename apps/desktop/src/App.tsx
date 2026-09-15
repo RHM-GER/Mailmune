@@ -293,7 +293,9 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
     const id = window.setInterval(() => setTick((value) => value + 1), 1000)
     return () => window.clearInterval(id)
   }, [finished, notice.run.id])
-  const indicator = notice.run.status === "failed" || notice.run.status === "interrupted" ? "#e5484d" : notice.run.status === "cancelled" ? "#f5a524" : finished ? "#46a758" : "#39c2d7"
+  // Info/laufend ist bewusst neutral (Hellgrau im Dark Theme); auffällige
+  // Farbtöne bleiben Fehler/Warnung/Erfolg vorbehalten.
+  const indicator = notice.run.status === "failed" || notice.run.status === "interrupted" ? "#e5484d" : notice.run.status === "cancelled" ? "#f5a524" : finished ? "#46a758" : "#d6d6d6"
   const title = finished
     ? notice.run.status === "completed" ? "Prüfung abgeschlossen"
       : notice.run.status === "cancelled" ? "Prüfung abgebrochen"
@@ -318,7 +320,7 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
       : `${notice.run.processed} Nachrichten gelesen`
   return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
     <div role="status" className="flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
-      <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${finished ? "" : "animate-pulse"}`} style={{ background: indicator }} />
+      <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${finished ? "" : "toast-pulse"}`} style={{ background: indicator }} />
       <div className="min-w-0">
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-1 text-xs leading-5 text-[#888]">{detail}</p>

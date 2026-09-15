@@ -192,9 +192,30 @@ button:disabled {
   will-change: transform, opacity;
 }
 
+/* Deutlich sichtbarerer Lade-Puls für Toast-Indikatoren:Opacity, Scale und
+   ein auslaufender Glow-Ring statt des subtilen Standard-Pulsierens. */
+@keyframes toast-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+    box-shadow: 0 0 0 6px rgba(255, 255, 255, 0);
+  }
+}
+
+.toast-pulse {
+  animation: toast-pulse 1.1s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .floating-action-enter,
-  .floating-action-exit {
+  .floating-action-exit,
+  .toast-pulse {
     animation: none;
   }
 }
