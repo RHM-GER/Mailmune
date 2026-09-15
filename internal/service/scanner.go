@@ -241,8 +241,16 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// user's own confirmed learning can still outweigh it. A missing or
 	// broken model never blocks scanning.
 	var scorer classifier.StatisticalScorer
+	// learned is the bounded per-profile context for the optional local model
+	// ("RAG light"): the same confirmed knowledge that drives scoring, built
+	// once per run. It stays nil until the profile has enough confirmed
+	// examples, so an untrained account sends the plain contract.
+	var learned *provider.LearnedContext
 	if combined := s.buildScorer(ctx, account.ID); combined != nil && combined.Trained() >= minLearningSamples {
 		scorer = combined
+		if spamSignals, hamSignals := combined.TopSignals(8); len(spamSignals)+len(hamSignals) > 0 {
+			learned = &provider.LearnedContext{SpamSignals: spamSignals, HamSignals: hamSignals}
+		}
 	}
 
 	handler := func(message domain.MessageFeatures, text string) error {
@@ -257,7 +265,7 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		}
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
-		s.consultModel(ctx, account, message, &classification)
+		s.consultModel(ctx, account, message, &classification, learned)
 		action := classifier.Decide(account.SafetyMode, classification)
 		if action == classifier.ActionIgnore {
 			return nil
@@ -340,14 +348,14 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 
 // consultModel runs the optional local Ollama classification for ambiguous
 // cases and merges a validated verdict as a single independent signal group.
-func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification) bool {
+func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext) bool {
 	if !account.OllamaValidated || account.OllamaModel == "" {
 		return false
 	}
 	if classification.Score < 0.25 || classification.Score >= 0.98 {
 		return false
 	}
-	verdict, err := s.ollama.Classify(ctx, account.OllamaModel, message, account.Profile)
+	verdict, err := s.ollama.Classify(ctx, account.OllamaModel, message, account.Profile, learned)
 	if err != nil {
 		return false
 	}

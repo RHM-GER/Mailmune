@@ -12,7 +12,7 @@ Mailmune ist ein lokaler IMAP-Spamfilter mit menschlicher Abnahme. Die Anwendung
 - Dreistufige Klassifikation:
   1. deterministische Regelpipeline mit generischen Heuristiken (maschinell erzeugte Absenderdomains, Ziffernmuster, Druck-/Lock-/Bestätigungs-/Finanzsprache, Betreff-Anomalien) und stabilen Evidence-Codes ([docs/evidence-codes.md](docs/evidence-codes.md))
   2. lokaler Naive-Bayes-Lernfilter aus bestätigten Reviews, optional verstärkt durch eine importierte Offline-Baseline (opt-in, mit Herkunft/Lizenz)
-  3. optionales lokales Ollama-Modell (nur Loopback, versionierter Prompt, strikte JSON-Validierung, Fähigkeitstest, Empfehlungsliste) – zählt höchstens als eine Signalgruppe
+  3. optionales lokales Ollama-Modell (nur Loopback, versionierter Prompt, strikte JSON-Validierung, Fähigkeitstest, Empfehlungsliste) – zählt höchstens als eine Signalgruppe und erhält als „RAG light" ausschließlich den datenschutzsicheren Profil-Kontext aus bestätigten Reviews (diskriminative Tokens und Absenderdomains, niemals Rohtext oder vollständige Adressen, strikt je Postfach)
 - **Absturzfeste Move-Zustandsmaschine**: bestätigte Verdachtsfälle wandern per atomarem UID-MOVE in `AI_SPAM_FILTER`, Fehlalarme zurück in den Ursprungsordner; idempotent, mit UIDVALIDITY-Recheck und Reconcile nach Absturz; ohne MOVE-Unterstützung wird nie verschoben
 - **Kalibrierungsmessung** aus bestätigten Reviews (Precision/Recall/FPR, Kalibrierungsbuckets); automatische Verschiebung ist erst ab 20 Reviews mit ≥ 99,5 % Präzision bei Score ≥ 0,98 freischaltbar
 - Echte Dashboard-Statistiken (`GET /v1/stats`) statt Demo-Charts in der Desktop-App

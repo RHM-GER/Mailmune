@@ -167,6 +167,76 @@ func (m *Model) Score(features map[string]int) (float64, bool) {
 	return clamp01(probability), true
 }
 
+// TopSignals returns up to k of the most class-discriminative learned tokens
+// per side, formatted as privacy-safe labels. It is used to give the optional
+// local model a bounded per-profile context ("RAG light"): the same confirmed
+// knowledge that drives scoring, expressed as normalized tokens and sender
+// domains. It never exposes raw message text and never exposes full sender
+// addresses (snd:), so no personal correspondents leak into a prompt. A token
+// must be supported by at least two confirmed occurrences and lean clearly to
+// one class (P >= 0.7 or P <= 0.3) to appear, which keeps one-off noise out.
+func (m *Model) TopSignals(k int) (spam, ham []string) {
+	if m == nil || k <= 0 || m.SpamMessages == 0 || m.HamMessages == 0 {
+		return nil, nil
+	}
+	type scored struct {
+		label string
+		p     float64
+	}
+	seen := make(map[string]struct{}, len(m.SpamCounts)+len(m.HamCounts))
+	var candidates []scored
+	consider := func(token string) {
+		if _, ok := seen[token]; ok {
+			return
+		}
+		seen[token] = struct{}{}
+		if strings.HasPrefix(token, "snd:") {
+			return
+		}
+		if m.SpamCounts[token]+m.HamCounts[token] < 2 {
+			return
+		}
+		ps := m.probability(token, true)
+		ph := m.probability(token, false)
+		candidates = append(candidates, scored{label: signalLabel(token), p: ps / (ps + ph)})
+	}
+	for token := range m.SpamCounts {
+		consider(token)
+	}
+	for token := range m.HamCounts {
+		consider(token)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].p > candidates[j].p })
+	for _, candidate := range candidates {
+		if len(spam) >= k {
+			break
+		}
+		if candidate.p >= 0.7 {
+			spam = append(spam, candidate.label)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].p < candidates[j].p })
+	for _, candidate := range candidates {
+		if len(ham) >= k {
+			break
+		}
+		if candidate.p <= 0.3 {
+			ham = append(ham, candidate.label)
+		}
+	}
+	return spam, ham
+}
+
+// signalLabel renders a stored feature token as a readable, privacy-safe hint.
+// Sender domains are labeled so the model can tell them from body words; the
+// snd: prefix never reaches this function because TopSignals filters it out.
+func signalLabel(token string) string {
+	if rest, ok := strings.CutPrefix(token, "dom:"); ok {
+		return "sender-domain:" + rest
+	}
+	return token
+}
+
 // Reset clears all learned state, keeping the model usable.
 func (m *Model) Reset() {
 	m.SpamCounts = map[string]uint64{}

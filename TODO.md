@@ -48,6 +48,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Opt-in-Import einer externen Lern-Baseline und Offline-Evaluierung gegen das dokumentierte MIT-Datenset (mltool, ohne Auslieferung im Repo)
 - [ ] Export des Lernwissens und Zurücksetzen aus der UI
 - [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
+- [x] Lokales Modell mit datenschutzsicherem Profil-Kontext versorgen („RAG light": diskriminative Tokens und Absenderdomains aus bestätigten Reviews, niemals Rohtext oder vollständige Adressen, strikt je Postfach)
 - [x] Fähigkeitstest als feste Proben-Suite umsetzen (persistierte Validierung je Konto, Empfehlungsliste in der UI)
 - [ ] Reproduzierbaren Modellvergleich für 16-GB-Laptops umsetzen
 - [ ] Wissen vom Modell entkoppeln: Profil, Regeln, Statistik und Beispiele bleiben modellunabhängig

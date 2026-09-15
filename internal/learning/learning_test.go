@@ -125,6 +125,94 @@ func TestMergedBoundsBaselineAsPrior(t *testing.T) {
 	}
 }
 
+func TestTopSignalsExposesDiscriminativePrivacySafeContext(t *testing.T) {
+	m := NewModel()
+	trainBasics(m)
+	// Large k so every clearly discriminative token surfaces; ranking among
+	// equal-count tokens is map order and therefore not asserted.
+	spam, ham := m.TopSignals(50)
+	if len(spam) == 0 || len(ham) == 0 {
+		t.Fatalf("expected signals on both sides: spam=%v ham=%v", spam, ham)
+	}
+	if !hasSignal(spam, "gewinn") {
+		t.Fatalf("spam word missing from spam signals: %v", spam)
+	}
+	if !hasSignal(spam, "sender-domain:lotto.example") {
+		t.Fatalf("spam sender domain missing or mislabeled: %v", spam)
+	}
+	if !hasSignal(ham, "projekt") || !hasSignal(ham, "meeting") {
+		t.Fatalf("ham words missing from ham signals: %v", ham)
+	}
+	if !hasSignal(ham, "sender-domain:firma.example") {
+		t.Fatalf("ham sender domain missing or mislabeled: %v", ham)
+	}
+	// Classes must not cross.
+	if hasSignal(spam, "projekt") || hasSignal(ham, "gewinn") {
+		t.Fatalf("signals crossed classes: spam=%v ham=%v", spam, ham)
+	}
+	// Full sender addresses must never leak into model context.
+	for _, signal := range append(append([]string{}, spam...), ham...) {
+		if strings.Contains(signal, "@") {
+			t.Fatalf("sender address leaked into signals: %q", signal)
+		}
+	}
+}
+
+func TestTopSignalsRespectsLimit(t *testing.T) {
+	m := NewModel()
+	trainBasics(m)
+	spam, ham := m.TopSignals(3)
+	if len(spam) > 3 || len(ham) > 3 {
+		t.Fatalf("k not respected: spam=%d ham=%d", len(spam), len(ham))
+	}
+}
+
+func TestTopSignalsFiltersLowSupportAndSenderAddresses(t *testing.T) {
+	m := NewModel()
+	for i := 0; i < 5; i++ {
+		m.Train(map[string]int{"wichtigertoken": 3, "dom:spam.example": 2, "snd:boss@spam.example": 2}, ClassSpam)
+	}
+	// A one-off token (support 1) must never surface as context.
+	m.Train(map[string]int{"einmalrauschen": 1}, ClassSpam)
+	for i := 0; i < 5; i++ {
+		m.Train(map[string]int{"ruhigestoken": 3, "dom:firma.example": 2}, ClassHam)
+	}
+	spam, ham := m.TopSignals(20)
+	if !hasSignal(spam, "wichtigertoken") {
+		t.Fatalf("strong spam token missing: %v", spam)
+	}
+	if hasSignal(spam, "einmalrauschen") {
+		t.Fatalf("low-support token must be filtered: %v", spam)
+	}
+	if !hasSignal(ham, "ruhigestoken") {
+		t.Fatalf("strong ham token missing: %v", ham)
+	}
+	for _, signal := range append(append([]string{}, spam...), ham...) {
+		if strings.Contains(signal, "@") {
+			t.Fatalf("sender address leaked: %q", signal)
+		}
+	}
+}
+
+func TestTopSignalsRequiresBothClasses(t *testing.T) {
+	m := NewModel()
+	for i := 0; i < 10; i++ {
+		m.Train(ExtractFeatures("Gewinn", "spam@example.com", "example.com", "lotterie"), ClassSpam)
+	}
+	if spam, ham := m.TopSignals(5); spam != nil || ham != nil {
+		t.Fatalf("single-class model must not produce context: %v %v", spam, ham)
+	}
+}
+
+func hasSignal(signals []string, want string) bool {
+	for _, signal := range signals {
+		if signal == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMergedScoringStillSeparates(t *testing.T) {
 	baseline := NewModel()
 	for i := 0; i < 200; i++ {

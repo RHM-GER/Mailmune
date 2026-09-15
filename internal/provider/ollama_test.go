@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,12 +49,46 @@ func TestNewOllamaRejectsNonLoopback(t *testing.T) {
 
 func TestClassifyAcceptsValidVerdict(t *testing.T) {
 	provider := fakeOllama(t, func() (int, string) { return http.StatusOK, verdictJSON("spam", 0.91) })
-	verdict, err := provider.Classify(context.Background(), "test-model", domain.MessageFeatures{From: "a@b.example", Subject: "Gewinn"}, domain.MailboxProfile{})
+	verdict, err := provider.Classify(context.Background(), "test-model", domain.MessageFeatures{From: "a@b.example", Subject: "Gewinn"}, domain.MailboxProfile{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Class != "spam" || verdict.Score != 0.91 {
 		t.Fatalf("verdict = %+v", verdict)
+	}
+}
+
+func TestClassifyIncludesLearnedContext(t *testing.T) {
+	var captured string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = string(body)
+		_, _ = w.Write([]byte(verdictJSON("spam", 0.8)))
+	}))
+	t.Cleanup(server.Close)
+	ollama, err := NewOllama(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With context: the signals must appear in the prompt payload.
+	learned := &LearnedContext{SpamSignals: []string{"gewinn", "sender-domain:lotterie.example"}, HamSignals: []string{"projektbericht"}}
+	if _, err := ollama.Classify(context.Background(), "test-model", domain.MessageFeatures{From: "a@b.example", Subject: "s"}, domain.MailboxProfile{}, learned); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"learnedSignals", "gewinn", "sender-domain:lotterie.example", "projektbericht"} {
+		if !strings.Contains(captured, want) {
+			t.Fatalf("request body missing %q: %s", want, captured)
+		}
+	}
+
+	// Without context: the field must be absent so the plain contract holds.
+	captured = ""
+	if _, err := ollama.Classify(context.Background(), "test-model", domain.MessageFeatures{From: "a@b.example", Subject: "s"}, domain.MailboxProfile{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(captured, "learnedSignals") {
+		t.Fatalf("learnedSignals must be omitted for nil context: %s", captured)
 	}
 }
 
@@ -75,7 +110,7 @@ func TestClassifyRejectsContractViolations(t *testing.T) {
 	}
 	for name, respond := range cases {
 		provider := fakeOllama(t, respond)
-		if _, err := provider.Classify(context.Background(), "test-model", domain.MessageFeatures{}, domain.MailboxProfile{}); err == nil {
+		if _, err := provider.Classify(context.Background(), "test-model", domain.MessageFeatures{}, domain.MailboxProfile{}, nil); err == nil {
 			t.Fatalf("%s: expected rejection", name)
 		}
 	}

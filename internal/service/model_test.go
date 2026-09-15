@@ -3,13 +3,18 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
+	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/mailbox"
+	"github.com/RHM-GER/Mailmune/internal/mailbox/imaptest"
 	"github.com/RHM-GER/Mailmune/internal/provider"
 	"github.com/RHM-GER/Mailmune/internal/store"
 )
@@ -55,6 +60,74 @@ func seedAccount(t *testing.T, db *store.SQLite, id string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestScanPassesLearnedContextToModel(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-rag")
+	ctx := context.Background()
+
+	// Train a per-profile model with clear, discriminative signals so the
+	// scanner builds a learned context (>= minLearningSamples confirmed).
+	model := learning.NewModel()
+	for i := 0; i < 12; i++ {
+		model.Train(map[string]int{"lotteriegewinn": 3, "bonusjagd": 2, "dom:lotterie.example": 2}, learning.ClassSpam)
+		model.Train(map[string]int{"projektbericht": 3, "wochenplan": 2, "dom:firma.example": 2}, learning.ClassHam)
+	}
+	if err := db.SaveLearningModel(ctx, account.ID, model); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enable a validated local model on the account.
+	account.OllamaModel = "test-model"
+	account.OllamaValidated = true
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fake Ollama that captures the prompt payload.
+	var captured string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = string(body)
+		verdict, _ := json.Marshal(map[string]any{"class": "spam", "score": 0.9, "reasonCodes": []string{"TEST"}})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": string(verdict)})
+	}))
+	t.Cleanup(fake.Close)
+	ollama, err := provider.NewOllama(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scanner.ollama = ollama
+
+	// A mildly suspicious message the rules place in the ambiguous band
+	// [0.25, 0.98) so consultModel runs, but neutral to the trained model so
+	// the statistical stage does not push it back out of the band.
+	server.AddMessage("INBOX", "jemand@unbekannt.example", "Gratis Angebot jetzt",
+		"Dies ist ein neutrales Schreiben ohne besondere Merkmale", time.Now())
+
+	if _, err := svc.StartScan(ctx, account.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("run status = %s (%s)", run.Status, run.Error)
+	}
+	if captured == "" {
+		t.Fatal("local model was never consulted")
+	}
+	if !strings.Contains(captured, "learnedSignals") {
+		t.Fatalf("learned context missing from model prompt: %s", captured)
+	}
+	// The per-profile signals (spam and ham) must reach the model.
+	if !strings.Contains(captured, "lotteriegewinn") || !strings.Contains(captured, "projektbericht") {
+		t.Fatalf("per-profile signals missing from model prompt: %s", captured)
+	}
+	// Privacy: full sender addresses from training never leak into the prompt.
+	if strings.Contains(captured, "snd:") {
+		t.Fatalf("raw sender marker leaked into model prompt: %s", captured)
 	}
 }
 
