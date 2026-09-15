@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useTheme } from "@/components/theme-provider"
 import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { getCurrentWindow } from "@tauri-apps/api/window"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
 type Range = "week" | "month" | "year" | "all"
@@ -243,9 +244,14 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
+      <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
+        <WindowControls />
         <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} />
         <main className="relative min-w-0 flex-1 overflow-hidden">
+          {/* Rahmenloses Fenster: dieser transparente Bereich oben ersetzt die
+              native Titelleiste zum Ziehen; Doppelklick maximiert. Er liegt im
+              leeren pt-12-Rand der Seiten und verdeckt keine Inhalte. */}
+          <div data-tauri-drag-region className="absolute inset-x-0 top-0 z-30 h-9" />
           <div ref={mainScrollRef} className="h-full overflow-y-auto">
           {page === "settings" && <Header page={page} />}
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
@@ -329,6 +335,19 @@ function AccountSwitcher({ compact }: { compact: boolean }) {
       <DropdownMenuContent side={compact ? "right" : "top"} align="start" className="min-w-[250px]"><DropdownMenuItem><span className="mr-2 flex size-7 items-center justify-center rounded bg-[#ff4d00] text-[10px] text-black">ST</span>STRATO Postfach</DropdownMenuItem><DropdownMenuItem><Plus />Postfach hinzufügen</DropdownMenuItem></DropdownMenuContent>
     </DropdownMenu>
   </div>
+}
+
+function WindowControls() {
+  if (!isTauri()) return null
+  const win = getCurrentWindow()
+  const base = "flex h-9 w-[46px] items-center justify-center text-[#c4c4c4] transition-colors hover:bg-white/[0.08] hover:text-white"
+  return (
+    <div className="absolute right-0 top-0 z-50 flex h-9 items-center">
+      <button type="button" className={base} onClick={() => void win.minimize()} aria-label="Minimieren"><Minus className="size-4" /></button>
+      <button type="button" className={base} onClick={() => void win.toggleMaximize()} aria-label="Maximieren"><Square className="size-[11px]" /></button>
+      <button type="button" className={`${base} hover:bg-[#e81123] hover:text-white`} onClick={() => void win.close()} aria-label="Schließen"><X className="size-4" /></button>
+    </div>
+  )
 }
 
 function Header({ page }: { page: Page }) {
