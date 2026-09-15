@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -21,7 +21,7 @@ import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, Recom
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
-type Range = "week" | "month" | "year" | "all"
+type Range = "week" | "month" | "year" | "all" | "custom"
 type SortKey = "receivedAt" | "from" | "subject" | "score" | "status" | "category"
 type SortDirection = "asc" | "desc" | null
 
@@ -391,6 +391,85 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
   return <div className="flex rounded-lg border border-white/[0.07] bg-[#242424] p-1">{options.map((option) => <button key={option} onClick={() => onChange(option)} className={`rounded-md px-2.5 py-1.5 text-xs ${value === option ? "bg-[#171717] text-white" : "text-[#777] hover:text-white"}`}>{option}</button>)}</div>
 }
 
+// Date helpers for the custom range picker (plain JS, no extra dependency).
+// ISO strings (YYYY-MM-DD) compare lexicographically in chronological order.
+type MonthView = { year: number; month: number }
+function monthOf(iso?: string | null): MonthView {
+  const parsed = iso ? new Date(iso) : new Date()
+  const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed
+  return { year: base.getFullYear(), month: base.getMonth() }
+}
+function shiftMonth(view: MonthView, delta: number): MonthView {
+  const total = view.year * 12 + view.month + delta
+  return { year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 }
+}
+function toISO(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+}
+// Returns 6 weeks of cells (leading/trailing blanks are null), Monday-first.
+function buildMonthCells(year: number, month: number): (number | null)[] {
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (number | null)[] = []
+  for (let index = 0; index < firstWeekday; index++) cells.push(null)
+  for (let day = 1; day <= daysInMonth; day++) cells.push(day)
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
+}
+function formatShortDate(iso: string): string {
+  const [year, month, day] = iso.split("-")
+  return `${day}.${month}.${year}`
+}
+
+function DateRangeDialog({ open, onOpenChange, initial, onApply }: { open: boolean; onOpenChange: (open: boolean) => void; initial: { from: string; to: string } | null; onApply: (range: { from: string; to: string }) => void }) {
+  const [viewMonth, setViewMonth] = useState<MonthView>(() => monthOf(initial?.from))
+  const [from, setFrom] = useState(initial?.from ?? "")
+  const [to, setTo] = useState(initial?.to ?? "")
+  useEffect(() => {
+    if (!open) return
+    setFrom(initial?.from ?? "")
+    setTo(initial?.to ?? "")
+    setViewMonth(monthOf(initial?.from))
+  }, [open, initial])
+  const pick = (day: string) => {
+    if (!from || (from && to)) { setFrom(day); setTo("") }
+    else if (day < from) { setTo(from); setFrom(day) }
+    else { setTo(day) }
+  }
+  const cells = buildMonthCells(viewMonth.year, viewMonth.month)
+  const label = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(new Date(viewMonth.year, viewMonth.month, 1))
+  const apply = () => { if (!from) return; onApply({ from, to: to || from }); onOpenChange(false) }
+  const navButton = "flex size-8 items-center justify-center rounded-md text-[#aaa] transition-colors hover:bg-white/[0.06] hover:text-white"
+  const inputClass = "mt-1 h-10 w-full rounded-md border border-white/10 bg-[#242424] px-3 text-sm text-white outline-none [color-scheme:dark] focus:border-white/25"
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[360px]">
+      <DialogHeader><DialogTitle>Benutzerdefinierter Zeitraum</DialogTitle><DialogDescription>Von und Bis per Klick im Kalender wählen oder unten direkt eingeben.</DialogDescription></DialogHeader>
+      <div className="py-1">
+        <div className="mb-2 flex items-center justify-between">
+          <button type="button" onClick={() => setViewMonth(shiftMonth(viewMonth, -1))} aria-label="Vorheriger Monat" className={navButton}><ChevronLeft className="size-4" /></button>
+          <span className="text-sm font-medium">{label}</span>
+          <button type="button" onClick={() => setViewMonth(shiftMonth(viewMonth, 1))} aria-label="Nächster Monat" className={navButton}><ChevronRight className="size-4" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-[#666]">{["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((weekday) => <div key={weekday} className="py-1">{weekday}</div>)}</div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {cells.map((cell, index) => {
+            if (cell === null) return <div key={index} />
+            const iso = toISO(viewMonth.year, viewMonth.month, cell)
+            const endpoint = iso === from || iso === to
+            const between = !!from && !!to && iso > from && iso < to
+            return <button key={index} type="button" onClick={() => pick(iso)} className={`flex size-9 items-center justify-center rounded-md text-xs transition-colors ${endpoint ? "bg-[#ff6b2c] text-white" : between ? "bg-white/[0.08] text-white" : "text-[#a8a8a8] hover:bg-white/[0.06]"}`}>{cell}</button>
+          })}
+        </div>
+        <div className="mt-4 flex items-end gap-3">
+          <label className="flex-1 text-xs text-[#888]">Von<input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} className={inputClass} /></label>
+          <label className="flex-1 text-xs text-[#888]">Bis<input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} className={inputClass} /></label>
+        </div>
+      </div>
+      <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={!from} onClick={apply}>Übernehmen</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>
+}
+
 function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean }) {
   const tableScrollRef = useRef<HTMLDivElement>(null)
   const tableFade = useScrollFade(tableScrollRef)
@@ -405,6 +484,10 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
   // shown in full unless the user explicitly narrows it. The v2 key resets the
   // previous "week" default for existing installs.
   const [range, setRange] = useState<Range>(() => (readStoredValue("mailmune.reviewRange.v2", "spamalytic.reviewRange", "all") as Range))
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(() => {
+    try { const raw = localStorage.getItem("mailmune.reviewCustomRange"); return raw ? (JSON.parse(raw) as { from: string; to: string }) : null } catch { return null }
+  })
+  const [customOpen, setCustomOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
@@ -414,13 +497,21 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
   useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
   useEffect(() => { localStorage.setItem("mailmune.reviewFilter", reviewFilter) }, [reviewFilter])
   useEffect(() => { localStorage.setItem("mailmune.reviewRange.v2", range) }, [range])
+  useEffect(() => { if (customRange) localStorage.setItem("mailmune.reviewCustomRange", JSON.stringify(customRange)) }, [customRange])
   const resetFilters = () => { setRange("all"); setReviewFilter("review"); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
-    return decisions.filter((item) => item.score >= 0.6 && (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && referenceTime - new Date(item.receivedAt).getTime() <= days * 86_400_000 && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
+    const customFrom = range === "custom" && customRange ? new Date(customRange.from + "T00:00:00").getTime() : null
+    const customTo = range === "custom" && customRange ? new Date(customRange.to + "T23:59:59.999").getTime() : null
+    const inRange = (receivedAt: string) => {
+      const time = new Date(receivedAt).getTime()
+      if (customFrom !== null && customTo !== null) return time >= customFrom && time <= customTo
+      return referenceTime - time <= days * 86_400_000
+    }
+    return decisions.filter((item) => item.score >= 0.6 && (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && inRange(item.receivedAt) && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
       if (!sort.direction) return 0; const left = sort.key === "category" ? spamCategory(a) : a[sort.key]; const right = sort.key === "category" ? spamCategory(b) : b[sort.key]; const result = typeof left === "number" ? left - Number(right) : String(left).localeCompare(String(right), "de"); return sort.direction === "asc" ? result : -result
     })
-  }, [decisions, view, reviewFilter, range, query, sort, referenceTime])
+  }, [decisions, view, reviewFilter, range, customRange, query, sort, referenceTime])
   const toggleAll = () => setSelected(selected.length === filtered.length ? [] : filtered.map((item) => item.id))
   const changeView = (nextView: "review" | "spam") => { setSelected([]); setView(nextView) }
   const review = async (action: "confirm" | "reject") => {
@@ -442,7 +533,9 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
         <div className="flex shrink-0 items-center">
           <FilterToolbarButton active={filtersActive} open={filterOpen} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
-          {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => setRange(value as Range)}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem></SelectContent></Select></>}
+          {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
+          {range === "custom" && <button onClick={() => setCustomOpen(true)} className="ml-2 flex h-[52px] shrink-0 items-center gap-2 rounded-md border border-white! bg-white! px-3.5 text-sm text-[#171717]! transition-colors hover:bg-white/90"><CalendarDays className="size-4" />{customRange ? `${formatShortDate(customRange.from)} – ${formatShortDate(customRange.to)}` : "Zeitraum wählen"}</button>}
+          <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next && !customRange && range === "custom") setRange("all") }} initial={customRange} onApply={(picked) => { setCustomRange(picked); setRange("custom"); setSelected([]) }} />
         </div>
       </div><ScrollFade strength={toolbarFade} direction="horizontal" compact targetRef={toolbarScrollRef} /></div>
       <div className="relative mt-6 min-h-0 flex-1">
