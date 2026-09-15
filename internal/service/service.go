@@ -350,7 +350,9 @@ func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) 
 
 // Stats returns the aggregated daily activity series for the dashboard.
 func (s *Service) Stats(ctx context.Context, days int) ([]domain.DailyStat, error) {
-	return s.store.StatsSeries(ctx, days)
+	// Aggregate by the mail's received date so the dashboard timeline reflects
+	// when messages actually arrived, not when Mailmune scanned or reviewed them.
+	return s.store.StatsByReceivedDay(ctx, days)
 }
 
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }

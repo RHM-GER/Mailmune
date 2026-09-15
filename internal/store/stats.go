@@ -26,9 +26,50 @@ ON CONFLICT(day,account_id) DO UPDATE SET processed=processed+excluded.processed
 	return err
 }
 
-// StatsSeries returns aggregated activity per day (across all accounts) for
-// the last N days, oldest first. Days without activity are omitted; the
-// frontend fills gaps.
+// StatsByReceivedDay aggregates stored decisions by the EMAIL RECEIVED date
+// (not the scan/review activity date), so the dashboard shows when spam and
+// normal mail actually arrived instead of when Mailmune happened to process
+// them. Per received day it returns:
+//   - Confirmed = mail flagged as spam (score >= 0.60 candidate threshold) that
+//     was not rejected as a false positive,
+//   - Rejected  = false positives (a reviewer marked a flagged mail legit),
+//   - Processed = spam + normal, so the UI derives the normal inbox count as
+//     Processed - Confirmed,
+//   - Moved is unused (always 0).
+// Because it reads the decisions table, the "normal" series is only populated
+// when below-threshold messages are stored (the inspect-all test mode); in
+// normal operation only candidates are persisted.
+func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int) ([]domain.DailyStat, error) {
+	if days <= 0 || days > 3660 {
+		days = 30
+	}
+	since := time.Now().UTC().AddDate(0, 0, -days).Format(statsDay)
+	// received_at is RFC3339 UTC, so the first 10 chars are the YYYY-MM-DD day.
+	rows, err := s.db.QueryContext(ctx, `SELECT substr(received_at,1,10) AS day,
+COUNT(*) - SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END),
+0,
+SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END),
+SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END)
+FROM decisions WHERE substr(received_at,1,10) >= ? GROUP BY substr(received_at,1,10) ORDER BY day ASC`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var series []domain.DailyStat
+	for rows.Next() {
+		var stat domain.DailyStat
+		if err := rows.Scan(&stat.Day, &stat.Processed, &stat.Moved, &stat.Confirmed, &stat.Rejected); err != nil {
+			return nil, err
+		}
+		series = append(series, stat)
+	}
+	return series, rows.Err()
+}
+
+// StatsSeries returns aggregated ACTIVITY per day (across all accounts) for the
+// last N days from the daily_stats counters. NOTE: this is keyed by the day the
+// work happened, not the mail's received date, so the dashboard no longer uses
+// it (see StatsByReceivedDay); it is kept for the activity counters.
 func (s *SQLite) StatsSeries(ctx context.Context, days int) ([]domain.DailyStat, error) {
 	if days <= 0 || days > 3660 {
 		days = 30

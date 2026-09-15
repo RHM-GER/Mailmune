@@ -76,3 +76,48 @@ func TestRecordDailyStatsNoopOnZeroDeltas(t *testing.T) {
 	}
 	_ = domain.DailyStat{}
 }
+
+func TestStatsByReceivedDayGroupsByReceivedDate(t *testing.T) {
+	store := openTestStore(t)
+	insertTestAccount(t, store, "stats-recv")
+	ctx := context.Background()
+
+	day1 := time.Now().UTC().AddDate(0, 0, -5)
+	day2 := time.Now().UTC().AddDate(0, 0, -3)
+	save := func(id string, uid uint32, received time.Time, score float64, status domain.DecisionStatus) {
+		d := domain.MessageDecision{
+			ID: id, AccountID: "stats-recv", UIDValidity: 1, UID: uid, MessageIDHash: "h-" + id,
+			OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "a@b.example", Subject: "s",
+			Score: score, Status: status, IdempotencyKey: "k-" + id,
+			ReceivedAt: received, CreatedAt: received,
+		}
+		if _, _, err := store.SaveDecision(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// day1: one flagged spam (pending), one normal (below threshold), one false
+	// positive (flagged then rejected).
+	save("d1", 1, day1, 0.9, domain.StatusPending)
+	save("d2", 2, day1, 0.2, domain.StatusPending)
+	save("d3", 3, day1, 0.8, domain.StatusRejected)
+	// day2: one confirmed spam.
+	save("d4", 4, day2, 0.95, domain.StatusConfirmed)
+
+	series, err := store.StatsByReceivedDay(ctx, 3660)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byDay := map[string]domain.DailyStat{}
+	for _, stat := range series {
+		byDay[stat.Day] = stat
+	}
+	d1 := byDay[day1.Format("2006-01-02")]
+	// spam=1, normal=1 -> Processed=2; Confirmed(spam)=1; Rejected(false pos)=1.
+	if d1.Processed != 2 || d1.Confirmed != 1 || d1.Rejected != 1 {
+		t.Fatalf("day1 aggregation wrong: %+v", d1)
+	}
+	d2 := byDay[day2.Format("2006-01-02")]
+	if d2.Processed != 1 || d2.Confirmed != 1 || d2.Rejected != 0 {
+		t.Fatalf("day2 aggregation wrong: %+v", d2)
+	}
+}

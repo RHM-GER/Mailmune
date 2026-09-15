@@ -154,18 +154,20 @@ function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
       falsePositive: bucket.rejected,
     }))
   }
-  // Gesamt: nach Jahren gruppieren.
-  const byYear = new Map<string, { spam: number; processed: number; rejected: number }>()
+  // Gesamt: über den gesamten Zeitraum nach Monaten gruppieren, damit die
+  // Verteilung als Linie sichtbar wird statt als einzelner Punkt pro Jahr.
+  const allMonthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+  const byMonthAll = new Map<string, { spam: number; processed: number; rejected: number }>()
   for (const stat of stats) {
-    const key = stat.day.slice(0, 4)
-    const bucket = byYear.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
+    const key = stat.day.slice(0, 7)
+    const bucket = byMonthAll.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
     bucket.spam += stat.moved + stat.confirmed
     bucket.processed += stat.processed
     bucket.rejected += stat.rejected
-    byYear.set(key, bucket)
+    byMonthAll.set(key, bucket)
   }
-  return [...byYear.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([year, bucket]) => ({
-    label: year,
+  return [...byMonthAll.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, bucket]) => ({
+    label: `${allMonthNames[Number(key.slice(5, 7)) - 1]} ${key.slice(2, 4)}`,
     spam: bucket.spam,
     inbox: Math.max(bucket.processed - bucket.spam, 0),
     falsePositive: bucket.rejected,
@@ -196,7 +198,7 @@ export default function App() {
         agentRequest<Summary>("GET", "/v1/summary"),
         agentRequest<Decision[]>("GET", "/v1/decisions?limit=250"),
         agentRequest<Account[]>("GET", "/v1/accounts"),
-        fetchStats(400).catch(() => null),
+        fetchStats(3660).catch(() => null),
       ])
       setSummary(nextSummary)
       setDecisions(nextDecisions ?? [])
