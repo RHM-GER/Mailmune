@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
@@ -918,6 +918,8 @@ function AutomationPanel({ account, refresh }: { account: Account; refresh: () =
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
 
   const loadCalibration = async () => {
     try {
@@ -953,6 +955,23 @@ function AutomationPanel({ account, refresh }: { account: Account; refresh: () =
     }
   }
 
+  const doResetLearning = async () => {
+    setResetBusy(true)
+    setMessage("")
+    try {
+      const result = await resetLearning(account.id)
+      await loadCalibration()
+      setMessage(result.cleared > 0
+        ? `Lokales Lernen zurückgesetzt: ${result.cleared} bestätigte Beispiele entfernt. Entscheidungen und E-Mails bleiben erhalten.`
+        : "Kein gespeichertes Lernen zum Zurücksetzen vorhanden.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setResetBusy(false)
+      setResetOpen(false)
+    }
+  }
+
   const precision = report?.thresholds.find((item) => item.threshold >= 0.979 && item.threshold <= 0.981)
   const precisionText = precision && precision.tp + precision.fp > 0 ? `${Math.round(precision.precision * 1000) / 10} %` : "–"
   return <div className="mt-4 border-t border-white/[0.07] pt-3">
@@ -968,6 +987,11 @@ function AutomationPanel({ account, refresh }: { account: Account; refresh: () =
     {report?.autoMoveReady && <p className="mt-2 text-xs text-[#8ad08a]">Automatik freigeschaltet: Präzisionsziel von 99,5 % erreicht.</p>}
     {busy && <p className="mt-2 text-xs text-[#888]">Wird gespeichert …</p>}
     {message && <p className="mt-2 text-xs leading-5 text-[#888]">{message}</p>}
+    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
+      <p className="text-xs leading-5 text-[#666]">Lokales Lernen aus bestätigten Reviews für dieses Postfach zurücksetzen. Entscheidungen und E-Mails bleiben unverändert.</p>
+      <Button size="sm" variant="outline" onClick={() => setResetOpen(true)}>Lernen zurücksetzen</Button>
+    </div>
+    <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Entfernt alle aus bestätigten Reviews gelernten Merkmale dieses Postfachs.</DialogDescription></DialogHeader><div className="space-y-2 py-2 text-xs leading-5 text-[#999]"><p>• E-Mails und Entscheidungen werden nicht gelöscht.</p><p>• Eine importierte Offline-Baseline bleibt erhalten.</p><p>• Der Filter startet unvoreingenommen und lernt durch neue Bestätigungen erneut.</p></div><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button disabled={resetBusy} onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><DialogTitle>Automatik aktivieren?</DialogTitle><DialogDescription>Bestätigte Verdachtsfälle mit hoher Sicherheit werden in den Ordner {account.spamFolder || "AI_SPAM_FILTER"} verschoben.</DialogDescription></DialogHeader><div className="space-y-2 py-2 text-xs leading-5 text-[#999]"><p>• E-Mails werden niemals gelöscht – es gibt keine Löschfunktion.</p><p>• Fehlalarme lassen sich mit einem Klick in den Ursprungsordner zurückverschieben.</p><p>• Die Automatik kann jederzeit hier wieder ausgeschaltet werden.</p>{!report?.autoMoveReady && <p className="text-[#e0a86c]">Hinweis: Das Präzisionsziel (99,5 % bei ≥ 98 %) ist noch nicht erreicht. Der Agent lehnt die Aktivierung ab, bis genug bestätigte Entscheidungen vorliegen.</p>}</div><DialogFooter><Button variant="ghost" onClick={() => setConfirmOpen(false)}>Abbrechen</Button><Button disabled={busy} onClick={() => void setAutomation(true)}>Aktivieren</Button></DialogFooter></DialogContent></Dialog>
   </div>
 }

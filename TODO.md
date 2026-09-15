@@ -46,7 +46,8 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Statistischen Lernfilter aus bestätigten Spam- und Fehlalarm-Beispielen implementieren (lokaler Naive Bayes, Idempotenz, Giftschutz)
 - [x] Kalibrierungsmetriken (Precision, Recall, False-Positive-Rate) für den Lernfilter messen (Endpunkt + Automatik-Gate)
 - [x] Opt-in-Import einer externen Lern-Baseline und Offline-Evaluierung gegen das dokumentierte MIT-Datenset (mltool, ohne Auslieferung im Repo)
-- [ ] Export des Lernwissens und Zurücksetzen aus der UI
+- [x] Zurücksetzen des Lernwissens aus der UI (je Postfach; Entscheidungen, E-Mails und importierte Baseline bleiben erhalten)
+- [ ] Export des Lernwissens aus der UI (anonymisiert, mit Herkunft/Version)
 - [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
 - [x] Lokales Modell mit datenschutzsicherem Profil-Kontext versorgen („RAG light": diskriminative Tokens und Absenderdomains aus bestätigten Reviews, niemals Rohtext oder vollständige Adressen, strikt je Postfach)
 - [x] Fähigkeitstest als feste Proben-Suite umsetzen (persistierte Validierung je Konto, Empfehlungsliste in der UI)

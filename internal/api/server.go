@@ -58,6 +58,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("POST /v1/models/capability", s.capabilityTest)
 	mux.HandleFunc("POST /v1/accounts/{id}/models", s.setAccountModel)
 	mux.HandleFunc("POST /v1/accounts/{id}/models/validate", s.validateAccountModel)
+	mux.HandleFunc("POST /v1/accounts/{id}/learning/reset", s.resetLearning)
 	mux.HandleFunc("GET /v1/events", s.events)
 	// The event stream must never be cut off by the global write timeout.
 	s.http = &http.Server{Handler: s.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
@@ -243,6 +244,13 @@ func (s *Server) validateAccountModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report": report, "account": account})
+}
+
+// resetLearning clears the confirmed-review learning of one account. Decisions,
+// email and the imported baseline are never touched.
+func (s *Server) resetLearning(w http.ResponseWriter, r *http.Request) {
+	cleared, err := s.service.ResetLearning(r.Context(), r.PathValue("id"))
+	respond(w, "reset_learning_failed", map[string]uint64{"cleared": cleared}, err)
 }
 
 // events streams agent events as server-sent events: scan lifecycle,

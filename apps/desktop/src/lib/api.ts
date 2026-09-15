@@ -163,6 +163,13 @@ export function validateAccountModel(accountId: string, model: string): Promise<
   return agentRequest<{ report: CapabilityReport; account: Account }>("POST", `/v1/accounts/${accountId}/models/validate`, { model })
 }
 
+// resetLearning clears the confirmed-review learning of one mailbox. Decisions,
+// email and the imported baseline are never touched; the statistical filter
+// simply starts untrained again. Returns how many examples were cleared.
+export function resetLearning(accountId: string): Promise<{ cleared: number }> {
+  return agentRequest<{ cleared: number }>("POST", `/v1/accounts/${accountId}/learning/reset`)
+}
+
 export interface ThresholdMetric {
   threshold: number
   tp: number

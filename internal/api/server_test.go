@@ -9,10 +9,103 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/secrets"
 	"github.com/RHM-GER/Mailmune/internal/service"
 	"github.com/RHM-GER/Mailmune/internal/store"
 )
+
+func TestResetLearningEndpoint(t *testing.T) {
+	database, err := store.Open(t.TempDir() + "/reset.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	server, err := New(token, service.New(database, &memorySecrets{values: map[string]string{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve() }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	authenticated := func(method, path, body string) *http.Request {
+		var request *http.Request
+		if body != "" {
+			request, _ = http.NewRequest(method, server.Address()+path, strings.NewReader(body))
+		} else {
+			request, _ = http.NewRequest(method, server.Address()+path, nil)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		return request
+	}
+
+	createResponse, err := client.Do(authenticated(http.MethodPost, "/v1/accounts", `{"account":{"name":"Reset","host":"127.0.0.1","port":1,"username":"user","inboxFolder":"INBOX","spamFolder":"AI_SPAM_FILTER","safetyMode":"safe","enabled":true,"dryRun":true,"profile":{"purpose":"","industry":"","languages":[],"expectedMailTypes":[],"trustedDomains":[],"trustedSenders":[],"wantedNewsletters":[],"legitimateAutomated":[]}},"password":"secret"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct{ ID string }
+	if err := json.NewDecoder(createResponse.Body).Decode(&created); err != nil {
+		createResponse.Body.Close()
+		t.Fatal(err)
+	}
+	createResponse.Body.Close()
+	if created.ID == "" {
+		t.Fatalf("account creation status = %d", createResponse.StatusCode)
+	}
+
+	ctx := context.Background()
+	model := learning.NewModel()
+	for i := 0; i < 5; i++ {
+		model.Train(map[string]int{"gewinn": 3}, learning.ClassSpam)
+		model.Train(map[string]int{"projekt": 3}, learning.ClassHam)
+	}
+	if err := database.SaveLearningModel(ctx, created.ID, model); err != nil {
+		t.Fatal(err)
+	}
+
+	resetResponse, err := client.Do(authenticated(http.MethodPost, "/v1/accounts/"+created.ID+"/learning/reset", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resetResponse.StatusCode != http.StatusOK {
+		resetResponse.Body.Close()
+		t.Fatalf("reset status = %d", resetResponse.StatusCode)
+	}
+	var result struct {
+		Cleared uint64 `json:"cleared"`
+	}
+	if err := json.NewDecoder(resetResponse.Body).Decode(&result); err != nil {
+		resetResponse.Body.Close()
+		t.Fatal(err)
+	}
+	resetResponse.Body.Close()
+	if result.Cleared != 10 {
+		t.Fatalf("cleared = %d, want 10", result.Cleared)
+	}
+
+	after, err := database.LoadLearningModel(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != nil && after.Trained() != 0 {
+		t.Fatalf("learning not cleared: %+v", after)
+	}
+
+	unknown, err := client.Do(authenticated(http.MethodPost, "/v1/accounts/does-not-exist/learning/reset", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown.Body.Close()
+	if unknown.StatusCode == http.StatusOK {
+		t.Fatalf("unknown account reset should not succeed, got %d", unknown.StatusCode)
+	}
+}
 
 type memorySecrets struct{ values map[string]string }
 

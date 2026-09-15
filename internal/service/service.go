@@ -415,6 +415,28 @@ func (s *Service) ValidateAccountModel(ctx context.Context, accountID, model str
 	return report, account, nil
 }
 
+// ResetLearning removes all confirmed-review learning of one account and
+// returns how many confirmed examples were cleared. It never touches
+// decisions, email or the optional imported baseline; the statistical stage
+// simply falls back to an untrained state until new reviews arrive. Learning
+// is strictly per mailbox, so resetting one account leaves others untouched.
+func (s *Service) ResetLearning(ctx context.Context, accountID string) (uint64, error) {
+	if _, err := s.store.Account(ctx, accountID); err != nil {
+		return 0, err
+	}
+	var cleared uint64
+	if model, err := s.store.LoadLearningModel(ctx, accountID); err == nil && model != nil {
+		cleared = model.Trained()
+	}
+	if err := s.store.ResetLearningModel(ctx, accountID); err != nil {
+		return 0, err
+	}
+	if s.hub != nil {
+		s.hub.Publish("learning.reset", map[string]any{"accountId": accountID, "cleared": cleared})
+	}
+	return cleared, nil
+}
+
 func (s *Service) Purge(ctx context.Context) (int64, error) {
 	return s.store.PurgeReadableMetadata(ctx, time.Now().AddDate(0, 0, -180))
 }

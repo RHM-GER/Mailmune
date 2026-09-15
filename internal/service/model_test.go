@@ -131,6 +131,41 @@ func TestScanPassesLearnedContextToModel(t *testing.T) {
 	}
 }
 
+func TestResetLearningClearsOnlyAccountModel(t *testing.T) {
+	svc, db := newModelService(t, "http://127.0.0.1:1")
+	seedAccount(t, db, "acc-reset")
+	ctx := context.Background()
+
+	model := learning.NewModel()
+	for i := 0; i < 6; i++ {
+		model.Train(map[string]int{"gewinn": 3}, learning.ClassSpam)
+		model.Train(map[string]int{"projekt": 3}, learning.ClassHam)
+	}
+	if err := db.SaveLearningModel(ctx, "acc-reset", model); err != nil {
+		t.Fatal(err)
+	}
+
+	cleared, err := svc.ResetLearning(ctx, "acc-reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared != 12 {
+		t.Fatalf("cleared = %d, want 12 confirmed examples", cleared)
+	}
+	after, err := db.LoadLearningModel(ctx, "acc-reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != nil && after.Trained() != 0 {
+		t.Fatalf("account learning not cleared: %+v", after)
+	}
+
+	// An unknown account must error, not panic.
+	if _, err := svc.ResetLearning(ctx, "does-not-exist"); err == nil {
+		t.Fatal("expected error for unknown account")
+	}
+}
+
 func TestRecommendedModelsHasDefault(t *testing.T) {
 	svc, _ := newModelService(t, "http://127.0.0.1:1")
 	version, models := svc.RecommendedModels()
