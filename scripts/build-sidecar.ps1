@@ -1,5 +1,16 @@
 $ErrorActionPreference = "Stop"
 
+# Leftover processes from a previous dev run keep a lock on the sidecar that
+# tauri-build copies to target\debug\spam-agent.exe. When that file is locked,
+# copy_binaries fails with "Zugriff verweigert" (Os code 5, PermissionDenied)
+# and the whole build aborts. Stop Mailmune's own dev binaries first so the
+# fresh copy always succeeds. This only ever targets mailmune/spam-agent.
+foreach ($staleName in @("mailmune", "spam-agent*")) {
+    Get-Process -Name $staleName -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Milliseconds 400
+
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $outputDirectory = Join-Path $projectRoot "apps\desktop\src-tauri\binaries"
 $outputPath = Join-Path $outputDirectory "spam-agent-x86_64-pc-windows-msvc.exe"
