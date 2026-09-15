@@ -40,6 +40,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] UID-basierte Synchronisierung mit sicherem Resync bei UIDVALIDITY-Wechsel und idempotenten Entscheidungen
 - [ ] Credential Manager produktiv prüfen; Secret-Service- und Keychain-Adapter vorbereiten
 - [x] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
+- [x] Echte Dashboard-Statistiken mit Eingangsdatum-Bezug; „Eingang“ zählt jede angekommene Mail auch im Produktionsmodus (datenschutzarmer Arrival-Log: nur Tag + Message-ID-Hash, dedupliziert, 730 Tage Aufbewahrung)
 - [x] Nummerierte vorwärtslaufende Datenbankmigrationen
 - [ ] Backup und Export von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung (Import der Lern-Baseline existiert bereits)
 - [x] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert (Methoden-Audit des IMAP-Clients plus Move-Erhaltungs- und Purge-Sicherheitstests)

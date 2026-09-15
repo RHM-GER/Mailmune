@@ -356,6 +356,14 @@ func (s *SQLite) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 	}
 	since := formatTime(time.Now().AddDate(0, 0, -7))
 	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM decisions WHERE created_at>=?", since).Scan(&out.ProcessedWeek)
+	// "Scanned" is every unique message ever seen. The arrival log counts all
+	// of them (including below-threshold mail that is not stored as a
+	// decision); the decision count is the fallback for installations from
+	// before the log existed. Take whichever is larger.
+	var arrivals int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM received_log").Scan(&arrivals); err == nil && arrivals > out.Scanned {
+		out.Scanned = arrivals
+	}
 	denominator := out.Confirmed + out.Rejected
 	if denominator > 0 {
 		out.FalsePositive = float64(out.Rejected) / float64(denominator)

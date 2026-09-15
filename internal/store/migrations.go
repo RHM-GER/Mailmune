@@ -186,6 +186,26 @@ var migrations = []migration{
 			`ALTER TABLE accounts ADD COLUMN last_deep_scan_at TEXT`,
 		},
 	},
+	{
+		id:   7,
+		name: "received_log",
+		stmts: []string{
+			// Privacy-preserving arrival counter for the dashboard's "Eingang"
+			// series: one row per received message with ONLY the arrival day and
+			// the message-ID hash (never sender, subject or text). The primary
+			// key deduplicates rescans, so a message counts exactly once. Rows
+			// are purged after the retention window; decisions stay the source
+			// for spam/false-alarm counts.
+			`CREATE TABLE IF NOT EXISTS received_log (
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+ message_id_hash TEXT NOT NULL,
+ received_day TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(account_id, message_id_hash)
+)`,
+			`CREATE INDEX IF NOT EXISTS idx_received_log_day ON received_log(received_day)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

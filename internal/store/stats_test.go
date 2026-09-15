@@ -122,3 +122,66 @@ func TestStatsByReceivedDayGroupsByReceivedDate(t *testing.T) {
 		t.Fatalf("day2 aggregation wrong: %+v", d2)
 	}
 }
+
+func TestReceivedLogCountsArrivalsOnceAndFeedsStats(t *testing.T) {
+	store := openTestStore(t)
+	insertTestAccount(t, store, "stats-log")
+	ctx := context.Background()
+	day := time.Now().UTC().AddDate(0, 0, -2)
+	dayKey := day.Format("2006-01-02")
+
+	first, err := store.LogReceived(ctx, "stats-log", "hash-a", day)
+	if err != nil || !first {
+		t.Fatalf("first log = %v, %v", first, err)
+	}
+	// Rescans never double-count the same message.
+	again, err := store.LogReceived(ctx, "stats-log", "hash-a", day)
+	if err != nil || again {
+		t.Fatalf("duplicate log = %v, %v", again, err)
+	}
+	if _, err := store.LogReceived(ctx, "stats-log", "hash-b", day); err != nil {
+		t.Fatal(err)
+	}
+	// A zero received time must not produce a zero-day row.
+	if _, err := store.LogReceived(ctx, "stats-log", "hash-c", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// One candidate decision on the same day; the arrival counter stays at 2
+	// for that day and provides the "Eingang" total.
+	d := domain.MessageDecision{
+		ID: "x1", AccountID: "stats-log", UIDValidity: 1, UID: 1, MessageIDHash: "hash-a",
+		OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "spam@example.com", Subject: "Gewinn",
+		Score: 0.9, Status: domain.StatusPending, IdempotencyKey: "k-x1", ReceivedAt: day, CreatedAt: day,
+	}
+	if _, _, err := store.SaveDecision(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+
+	series, err := store.StatsByReceivedDay(ctx, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *domain.DailyStat
+	for i, stat := range series {
+		if stat.Day == dayKey {
+			found = &series[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("day %s missing from series: %+v", dayKey, series)
+	}
+	if found.Processed != 2 || found.Confirmed != 1 || found.Rejected != 0 {
+		t.Fatalf("arrival-backed aggregation wrong: %+v", *found)
+	}
+
+	// The summary's Scanned prefers the arrival log when it is larger than the
+	// decision count (production mode stores candidates only).
+	summary, err := store.Summary(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Scanned != 3 {
+		t.Fatalf("summary scanned = %d, want 3 (all logged arrivals)", summary.Scanned)
+	}
+}

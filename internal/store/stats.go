@@ -26,7 +26,41 @@ ON CONFLICT(day,account_id) DO UPDATE SET processed=processed+excluded.processed
 	return err
 }
 
-// StatsByReceivedDay aggregates stored decisions by the EMAIL RECEIVED date
+// LogReceived records that a message arrived, for the dashboard's "Eingang"
+// counter. Privacy: only the arrival day and the message-ID hash are stored
+// (the same hash decisions already carry) - never sender, subject or text.
+// Deduplicated by (account, hash), so rescans never double-count. It reports
+// whether this message was logged for the first time.
+func (s *SQLite) LogReceived(ctx context.Context, accountID, messageIDHash string, receivedAt time.Time) (bool, error) {
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO received_log(account_id,message_id_hash,received_day,created_at)
+VALUES(?,?,?,?) ON CONFLICT(account_id,message_id_hash) DO NOTHING`,
+		accountID, messageIDHash, receivedAt.UTC().Format(statsDay), formatTime(time.Now()))
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	return affected > 0, nil
+}
+
+// receivedLogRetention bounds how long arrival counters are kept. Two years
+// cover every dashboard range; older rows are pure metadata and are purged.
+const receivedLogRetention = 730
+
+// PurgeReceivedLog deletes arrival counters older than the retention window.
+func (s *SQLite) PurgeReceivedLog(ctx context.Context) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -receivedLogRetention).Format(statsDay)
+	result, err := s.db.ExecContext(ctx, `DELETE FROM received_log WHERE received_day < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return affected, nil
+}
+
+// StatsByReceivedDay aggregates the arrival counters and stored decisions by the EMAIL RECEIVED date
 // (not the scan/review activity date), so the dashboard shows when spam and
 // normal mail actually arrived instead of when Mailmune happened to process
 // them. Per received day it returns:
@@ -37,21 +71,25 @@ ON CONFLICT(day,account_id) DO UPDATE SET processed=processed+excluded.processed
 //     are a subset of the originally flagged mail,
 //   - Moved is unused (always 0).
 // Invariant: Confirmed + Rejected <= Processed (spam and false alarms are both
-// subsets of everything that arrived). Because it reads the decisions table,
-// the total only includes below-threshold mail when those are stored (the
-// inspect-all test mode); in normal operation only candidates are persisted.
+// subsets of everything that arrived). The arrival total comes from the
+// privacy-preserving received_log, so it is complete in normal operation;
+// decisions alone only contain candidates. Days scanned before received_log
+// existed are clamped so the invariant still holds.
 func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int) ([]domain.DailyStat, error) {
 	if days <= 0 || days > 3660 {
 		days = 30
 	}
 	since := time.Now().UTC().AddDate(0, 0, -days).Format(statsDay)
 	// received_at is RFC3339 UTC, so the first 10 chars are the YYYY-MM-DD day.
-	rows, err := s.db.QueryContext(ctx, `SELECT substr(received_at,1,10) AS day,
-COUNT(*),
-0,
-SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END),
-SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END)
-FROM decisions WHERE substr(received_at,1,10) >= ? GROUP BY substr(received_at,1,10) ORDER BY day ASC`, since)
+	rows, err := s.db.QueryContext(ctx, `SELECT day, MAX(received), 0, MAX(spam), MAX(rejected) FROM (
+SELECT received_day AS day, COUNT(*) AS received, 0 AS spam, 0 AS rejected
+FROM received_log WHERE received_day >= ? GROUP BY received_day
+UNION ALL
+SELECT substr(received_at,1,10) AS day, COUNT(*) AS received,
+SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END) AS spam,
+SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected
+FROM decisions WHERE substr(received_at,1,10) >= ? GROUP BY substr(received_at,1,10)
+) GROUP BY day ORDER BY day ASC`, since, since)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +99,11 @@ FROM decisions WHERE substr(received_at,1,10) >= ? GROUP BY substr(received_at,1
 		var stat domain.DailyStat
 		if err := rows.Scan(&stat.Day, &stat.Processed, &stat.Moved, &stat.Confirmed, &stat.Rejected); err != nil {
 			return nil, err
+		}
+		// Legacy days (decisions stored before received_log existed) may lack
+		// arrival rows; keep spam/false alarms a subset of the total.
+		if floor := stat.Confirmed + stat.Rejected; stat.Processed < floor {
+			stat.Processed = floor
 		}
 		series = append(series, stat)
 	}

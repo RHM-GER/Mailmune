@@ -305,6 +305,12 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		s.consultModel(ctx, account, message, &classification, learned, aiAll)
 		action := classifier.Decide(account.SafetyMode, classification)
 		isCandidate := action != classifier.ActionIgnore
+		// Count every arrival for the dashboard's "Eingang" series, including
+		// messages below the threshold that are not persisted as decisions.
+		// Only day + message-ID hash are stored; the log deduplicates rescans.
+		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
+		hashHex := hex.EncodeToString(hash[:])
+		_, _ = s.store.LogReceived(context.Background(), account.ID, hashHex, message.ReceivedAt)
 		// Testing mode (debugScanAllMessages): also store ignored messages so the
 		// reviewer can see why they were not flagged. In normal operation only
 		// candidates reach the review list and everything below the threshold is
@@ -330,10 +336,9 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 				}
 			}
 		}
-		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
 		decision := domain.MessageDecision{
 			ID: uuid.NewString(), AccountID: account.ID, UIDValidity: message.UIDValidity, UID: message.UID,
-			MessageIDHash: hex.EncodeToString(hash[:]), OriginFolder: message.Folder, CurrentFolder: current,
+			MessageIDHash: hashHex, OriginFolder: message.Folder, CurrentFolder: current,
 			From: message.From, Subject: message.Subject, Score: classification.Score, Status: status,
 			Evidence: classification.Evidence, ModelVersion: classification.ModelUsed,
 			IdempotencyKey: fmt.Sprintf("scan:%s:%d:%d:%s", account.ID, message.UIDValidity, message.UID, message.Folder),
@@ -396,6 +401,8 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			scanned = outcome.Processed
 		}
 		_ = s.store.RecordDailyStats(context.Background(), account.ID, "", scanned, result.moved, 0, 0)
+		// Arrival counters are pure metadata; keep them bounded anyway.
+		_, _ = s.store.PurgeReceivedLog(context.Background())
 		s.finish(run.ID, domain.ScanCompleted, "")
 	case errors.Is(syncErr, context.Canceled):
 		s.finish(run.ID, domain.ScanCancelled, "")
