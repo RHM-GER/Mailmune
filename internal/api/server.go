@@ -112,6 +112,10 @@ func (s *Server) saveAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value, err := s.service.SaveAccount(r.Context(), req)
+	if errors.Is(err, service.ErrAutomationNotCalibrated) {
+		writeError(w, http.StatusConflict, "automation_not_calibrated", err)
+		return
+	}
 	respond(w, "account_invalid", value, err)
 }
 func (s *Server) testAccount(w http.ResponseWriter, r *http.Request) {

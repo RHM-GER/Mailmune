@@ -592,7 +592,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.filter((account) => !hiddenAccounts.includes(account.id)).length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>
-        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}</ConnectionCard>)}
+        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}<AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.filter((account) => !hiddenAccounts.includes(account.id)).length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
@@ -811,6 +811,65 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     </div>
     {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
     <p className="mt-3 text-xs leading-5 text-[#666]">Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p>
+  </div>
+}
+
+function AutomationPanel({ account, refresh }: { account: Account; refresh: () => void }) {
+  const [report, setReport] = useState<CalibrationReport | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState("")
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const loadCalibration = async () => {
+    try {
+      setReport(await calibration(account.id))
+    } catch {
+      // Agent offline; keep the last known state.
+    }
+  }
+  useEffect(() => {
+    if (!isTauri()) return
+    void loadCalibration()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.id])
+
+  const setAutomation = async (enabled: boolean) => {
+    setBusy(true)
+    setMessage("")
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, dryRun: !enabled } })
+      await refresh()
+      await loadCalibration()
+      setMessage(enabled
+        ? "Automatik aktiv: bestätigte Verdachtsfälle wandern in den Spamordner. Gelöscht wird nie."
+        : "Automatik deaktiviert: reiner Trockenlauf, es wird nichts verschoben.")
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      setMessage(text.includes("automation_not_calibrated")
+        ? "Automatik gesperrt: mindestens 20 bestätigte Entscheidungen mit ≥ 99,5 % Präzision bei Score ≥ 98 % erforderlich."
+        : text)
+    } finally {
+      setBusy(false)
+      setConfirmOpen(false)
+    }
+  }
+
+  const precision = report?.thresholds.find((item) => item.threshold >= 0.979 && item.threshold <= 0.981)
+  const precisionText = precision && precision.tp + precision.fp > 0 ? `${Math.round(precision.precision * 1000) / 10} %` : "–"
+  return <div className="mt-4 border-t border-white/[0.07] pt-3">
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">Automatische Verschiebung</p>
+        <p className="mt-1 text-xs leading-5 text-[#666]">{report && report.reviewed > 0
+          ? `Kalibrierung: ${report.reviewed} geprüft · ${report.confirmed} Spam · ${report.rejected} Fehlalarme · Präzision ${precisionText} bei ≥ 98 %`
+          : "Noch keine bestätigten Entscheidungen – der Filter läuft im Trockenlauf."}</p>
+      </div>
+      <CompactOnOff enabled={!account.dryRun} label="Automatische Verschiebung" onChange={(enabled) => { if (enabled) setConfirmOpen(true); else void setAutomation(false) }} />
+    </div>
+    {report?.autoMoveReady && <p className="mt-2 text-xs text-[#8ad08a]">Automatik freigeschaltet: Präzisionsziel von 99,5 % erreicht.</p>}
+    {busy && <p className="mt-2 text-xs text-[#888]">Wird gespeichert …</p>}
+    {message && <p className="mt-2 text-xs leading-5 text-[#888]">{message}</p>}
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><DialogTitle>Automatik aktivieren?</DialogTitle><DialogDescription>Bestätigte Verdachtsfälle mit hoher Sicherheit werden in den Ordner {account.spamFolder || "AI_SPAM_FILTER"} verschoben.</DialogDescription></DialogHeader><div className="space-y-2 py-2 text-xs leading-5 text-[#999]"><p>• E-Mails werden niemals gelöscht – es gibt keine Löschfunktion.</p><p>• Fehlalarme lassen sich mit einem Klick in den Ursprungsordner zurückverschieben.</p><p>• Die Automatik kann jederzeit hier wieder ausgeschaltet werden.</p>{!report?.autoMoveReady && <p className="text-[#e0a86c]">Hinweis: Das Präzisionsziel (99,5 % bei ≥ 98 %) ist noch nicht erreicht. Der Agent lehnt die Aktivierung ab, bis genug bestätigte Entscheidungen vorliegen.</p>}</div><DialogFooter><Button variant="ghost" onClick={() => setConfirmOpen(false)}>Abbrechen</Button><Button disabled={busy} onClick={() => void setAutomation(true)}>Aktivieren</Button></DialogFooter></DialogContent></Dialog>
   </div>
 }
 

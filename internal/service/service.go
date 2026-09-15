@@ -104,6 +104,10 @@ func (s *Service) Close() {
 	}
 }
 
+// ErrAutomationNotCalibrated blocks leaving the dry run before the local
+// calibration proves the required precision.
+var ErrAutomationNotCalibrated = errors.New("automation requires at least 20 reviewed decisions with 99.5% precision at the auto-move threshold")
+
 func (s *Service) Accounts(ctx context.Context) ([]domain.AccountConfig, error) {
 	return s.store.ListAccounts(ctx)
 }
@@ -141,6 +145,19 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 	case domain.SafetyConfirmAll, domain.SafetySafe, domain.SafetyAggressive:
 	default:
 		return a, errors.New("unsupported safety mode")
+	}
+	if !isNew && !a.DryRun {
+		// Leaving the dry run enables real moves. The handoff requires proven
+		// calibration first: at least 20 reviewed decisions at the auto-move
+		// threshold with >= 99.5% precision. Turning automation back off is
+		// always allowed.
+		existing, err := s.store.Account(ctx, a.ID)
+		if err == nil && existing.DryRun {
+			report, calErr := s.CalibrationReport(ctx, a.ID)
+			if calErr != nil || !report.AutoMoveReady {
+				return a, ErrAutomationNotCalibrated
+			}
+		}
 	}
 	if a.Host == "" || a.Username == "" || a.Name == "" {
 		return a, errors.New("name, host and username are required")
