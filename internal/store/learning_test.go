@@ -77,6 +77,51 @@ func TestSaveDecisionDedupReturnsExistingID(t *testing.T) {
 	}
 }
 
+func TestRefreshPendingDecisionUpdatesOnlyPending(t *testing.T) {
+	store := openTestStore(t)
+	insertTestAccount(t, store, "refresh-1")
+	ctx := context.Background()
+
+	pending := domain.MessageDecision{
+		ID: "p1", AccountID: "refresh-1", UIDValidity: 1, UID: 1, MessageIDHash: "h1",
+		OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "a@b.example", Subject: "s",
+		Score: 0.6, Status: domain.StatusPending, IdempotencyKey: "k-p1",
+		ReceivedAt: time.Now(), CreatedAt: time.Now(),
+	}
+	if _, _, err := store.SaveDecision(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+	confirmed := pending
+	confirmed.ID = "c1"
+	confirmed.UID = 2
+	confirmed.IdempotencyKey = "k-c1"
+	confirmed.Status = domain.StatusConfirmed
+	confirmed.Score = 0.7
+	if _, _, err := store.SaveDecision(ctx, confirmed); err != nil {
+		t.Fatal(err)
+	}
+
+	evidence := []domain.Evidence{{Group: "model", Code: "local_model_spam", Weight: 0.9, Summary: "x"}}
+	updated, err := store.RefreshPendingDecision(ctx, "p1", 0.93, evidence, "llama3")
+	if err != nil || !updated {
+		t.Fatalf("pending refresh: updated=%v err=%v", updated, err)
+	}
+	got, _ := store.DecisionsByIDs(ctx, []string{"p1"})
+	if len(got) != 1 || got[0].Score != 0.93 || got[0].ModelVersion != "llama3" {
+		t.Fatalf("pending decision not refreshed: %+v", got)
+	}
+
+	// A confirmed decision is ground truth and must never change.
+	updated, err = store.RefreshPendingDecision(ctx, "c1", 0.99, evidence, "llama3")
+	if err != nil || updated {
+		t.Fatalf("confirmed refresh must be a no-op: updated=%v err=%v", updated, err)
+	}
+	got, _ = store.DecisionsByIDs(ctx, []string{"c1"})
+	if len(got) != 1 || got[0].Score != 0.7 {
+		t.Fatalf("confirmed decision changed: %+v", got)
+	}
+}
+
 func TestDecisionFeaturesLifecycle(t *testing.T) {
 	store := openTestStore(t)
 	insertTestAccount(t, store, "learn-2")

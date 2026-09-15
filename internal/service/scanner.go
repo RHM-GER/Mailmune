@@ -298,9 +298,19 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		// SaveDecision deduplicates on (account, validity, uid, folder); the
 		// returned ID is the stored row's ID, which may differ from the freshly
 		// generated one after a resync. Features must attach to the stored ID.
-		storedID, _, err := s.store.SaveDecision(context.Background(), decision)
+		storedID, created, err := s.store.SaveDecision(context.Background(), decision)
 		if err != nil {
 			return err
+		}
+		if !created {
+			// Resync of an already-stored message: refresh the mutable
+			// classification of a still-pending decision so an improved rule
+			// set, learning model or validated local LLM verdict is reflected
+			// instead of being discarded by the dedup. Reviewed and moved
+			// decisions are ground truth and stay frozen.
+			if _, err := s.store.RefreshPendingDecision(context.Background(), storedID, classification.Score, classification.Evidence, classification.ModelUsed); err != nil {
+				return err
+			}
 		}
 		// Keep the compact feature vector so a confirmed review can train the
 		// local model later. It is deleted after training or purged after 180

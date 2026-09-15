@@ -205,6 +205,66 @@ func TestResyncRereadsMailboxWithoutForeignKeyViolation(t *testing.T) {
 	}
 }
 
+func TestResyncRefreshesPendingDecisionScore(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-refresh-score")
+
+	server.AddMessage("INBOX", "unbekannt@lotterie.example", "Gewinn: sofort handeln",
+		"lotteriegewinn bonusjagd jetzt anmelden", time.Now(),
+		"Authentication-Results: mx.test; spf=fail")
+
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("first run: %s (%s)", run.Status, run.Error)
+	}
+	first, err := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("decisions = %d, want 1 (err=%v)", len(first), err)
+	}
+	before := first[0].Score
+
+	// Train a model that strongly matches this message so a resync scores it
+	// higher via the statistical signal group.
+	model := learning.NewModel()
+	for i := 0; i < 12; i++ {
+		model.Train(map[string]int{"lotteriegewinn": 3, "bonusjagd": 3, "dom:lotterie.example": 2}, learning.ClassSpam)
+		model.Train(map[string]int{"projektbericht": 3, "wochenplan": 2, "dom:firma.example": 2}, learning.ClassHam)
+	}
+	if err := db.SaveLearningModel(context.Background(), account.ID, model); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resync re-reads the same message; the still-pending decision must reflect
+	// the improved score instead of keeping the stale pre-learning one.
+	if _, err := svc.StartScan(context.Background(), account.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	run = waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("resync: %s (%s)", run.Status, run.Error)
+	}
+	second, _ := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if len(second) != 1 {
+		t.Fatalf("decisions after resync = %d, want 1 (dedup)", len(second))
+	}
+	if second[0].Score <= before {
+		t.Fatalf("pending score not refreshed on resync: before=%.3f after=%.3f", before, second[0].Score)
+	}
+	foundStatistical := false
+	for _, ev := range second[0].Evidence {
+		if ev.Code == "statistical_spam" {
+			foundStatistical = true
+		}
+	}
+	if !foundStatistical {
+		t.Fatalf("statistical evidence missing after resync: %+v", second[0].Evidence)
+	}
+}
+
 func TestScanStartIsIdempotentWhileRunning(t *testing.T) {
 	server := imaptest.New(t, rev2Caps())
 	svc, _ := newTestService(t, server)
