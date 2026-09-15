@@ -106,10 +106,23 @@ Behoben bzw. umgesetzt:
 
 Weiterhin offen (siehe TODO.md):
 
-- Move-Zustandsmaschine (`move_planned/moving/...`) mit Zielprüfung und
-  Rückverschiebung; bis dahin verschiebt nur die bestehende, MOVE-gebundene
-  Pfadlogik im freigegebenen Nicht-Trockenlauf.
-- IMAP-IDLE, periodischer Abgleich, Standby-Reconnect.
-- Kalibrierungsmetriken und Export/Import des Lernwissens.
-- Rust-SSE-Weiterleiter ist ohne lokale Rust-Toolchain erstellt und muss
-  beim ersten Desktop-Build verifiziert werden.
+- Erstdurchlauf-Profilierung (90 Tage/1.000 Nachrichten) mit Vorschlagsworkflow.
+- Erkennung externer Client-Bewegungen (Thunderbird/Outlook) als Feedback.
+- Export/Import vollständiger Profil- und Lernpakete über die UI (Baseline-Import per CLI existiert).
+- Benachrichtigungsseite und Wochenprüfung mit echten Ereignissen.
+- Ressourcenmessungen, signierte Updates, Linux-Paketierung.
+
+Seit dem Zwischenstand zusätzlich umgesetzt:
+
+- Generische Klassifikations-Heuristiken statt Brand-Listen (Realtest: 51/87
+  Phishing-Mails erkannt, echte Mails unter der Schwelle).
+- Crashfeste Move-Zustandsmaschine mit Restore, UIDVALIDITY-Recheck,
+  Reconcile und Idempotenz; Automatik erst nach Kalibrierungsgate
+  (≥ 20 Reviews, ≥ 99,5 % Präzision bei 0,98).
+- IMAP-IDLE mit Debounce plus 10-Minuten-Abgleich als Sicherheitsnetz.
+- Kalibrierungsmessung aus bestätigten Reviews (Endpunkt + UI-Gate).
+- Opt-in-Baseline-Import (mltool) mit Herkunft/Lizenz und begrenztem
+  Prior-Gewicht; Offline-Evaluations-Harness (Precision/Recall/FPR).
+- Ollama: Empfehlungsliste, persistierte Validierung je Konto,
+  Modellverwaltung in der UI.
+- Echte Dashboard-Statistiken statt Demo-Charts.

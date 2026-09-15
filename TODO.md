@@ -6,12 +6,13 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 ### P0 – Nutzbarer Sicherheitskern
 
-- [ ] Native Tauri-App auf Windows 11 vollständig kompilieren und Sidecar-Handshake prüfen (inkl. Verifikation des Rust-SSE-Weiterleiters beim ersten Build)
+- [ ] Native Tauri-App auf Windows 11 vollständig kompilieren und Sidecar-Handshake prüfen (Rust-SSE-Weiterleiter ist per cargo check verifiziert; erster voller Desktop-Build steht aus)
 - [ ] Testkonto sicher speichern, Verbindung testen und ausschließlich lesenden Trockenlauf ausführen
-- [ ] Sichere IMAP-MOVE-Transaktion mit Zielprüfung und Wiederherstellung implementieren
-- [ ] Reviewaktionen mit Verschiebung erst nach erfolgreichen MOVE-, Wiederholungs- und Absturztests aktivieren
+- [x] Sichere IMAP-MOVE-Transaktion mit Zielprüfung und Wiederherstellung implementieren (Zustandsmaschine, UIDVALIDITY-Recheck, Reconcile, Restore)
+- [x] Reviewaktionen mit Verschiebung erst nach erfolgreichen MOVE-, Wiederholungs- und Absturztests aktivieren (Automatik zusätzlich durch Kalibrierungsgate gesperrt)
 - [x] UI und Agent verbinden; Demo-Daten klar von echten Daten trennen (Desktop startet leer, Browser-Vorschau mit Demo)
-- [ ] Dashboard-Charts und Benachrichtigungen mit echten Verlaufsdaten verbinden
+- [x] Dashboard-Charts mit echten Verlaufsdaten verbinden
+- [ ] Benachrichtigungsseite mit echten Ereignissen verbinden
 
 ### P1 – UI-Konsolidierung
 
@@ -28,24 +29,26 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 ### P0 – IMAP, Sicherheit und Datenhaltung
 
 - [ ] Echter STRATO-Trockenlauf mit mindestens 100 manuell geprüften Entscheidungen
-- [ ] IMAP-IDLE plus zehnminütiger Abgleich und Standby-Reconnect
+- [x] IMAP-IDLE plus zehnminütiger Abgleich und Reconnect mit Backoff/Jitter
 - [x] UID-basierte Synchronisierung mit sicherem Resync bei UIDVALIDITY-Wechsel und idempotenten Entscheidungen
 - [ ] Credential Manager produktiv prüfen; Secret-Service- und Keychain-Adapter vorbereiten
 - [x] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
 - [x] Nummerierte vorwärtslaufende Datenbankmigrationen
-- [ ] Backup, Export und Import von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung
+- [ ] Backup und Export von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung (Import der Lern-Baseline existiert bereits)
 - [ ] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert
 - [ ] Externe Blacklists nur mit Herkunft, Lizenz, Signatur/Hash, Aktualitätsprüfung und Rollback evaluieren
 - [ ] Blacklist-Updates ohne Telemetrie und unabhängig von App-Releases konzipieren
+- [ ] Externe Client-Bewegungen (Thunderbird/Outlook) als Feedback erkennen, ohne Schleifen
 
 ### P0 – Klassifikation und Lernsystem
 
 - [x] Deterministischen Regelkern für Header, Korrespondenz, Domains, Links, Mailinglisten und Authentifizierung fertigstellen (Stufen-Pipeline mit stabilen Evidence-Codes, Allow-/Deny-Listen)
 - [x] Statistischen Lernfilter aus bestätigten Spam- und Fehlalarm-Beispielen implementieren (lokaler Naive Bayes, Idempotenz, Giftschutz)
-- [ ] Kalibrierungsmetriken (Precision, Recall, False-Positive-Rate) für den Lernfilter messen
-- [ ] Export/Import/Reset des Lernfilters und Evaluierung gegen das dokumentierte MIT-Datenset (nur offline, ohne Auslieferung)
+- [x] Kalibrierungsmetriken (Precision, Recall, False-Positive-Rate) für den Lernfilter messen (Endpunkt + Automatik-Gate)
+- [x] Opt-in-Import einer externen Lern-Baseline und Offline-Evaluierung gegen das dokumentierte MIT-Datenset (mltool, ohne Auslieferung im Repo)
+- [ ] Export des Lernwissens und Zurücksetzen aus der UI
 - [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
-- [x] Fähigkeitstest als feste Proben-Suite umsetzen
+- [x] Fähigkeitstest als feste Proben-Suite umsetzen (persistierte Validierung je Konto, Empfehlungsliste in der UI)
 - [ ] Reproduzierbaren Modellvergleich für 16-GB-Laptops umsetzen
 - [ ] Wissen vom Modell entkoppeln: Profil, Regeln, Statistik und Beispiele bleiben modellunabhängig
 - [ ] Modellwechsel mit Re-Benchmark, Schattenbetrieb und Rollback gestalten
