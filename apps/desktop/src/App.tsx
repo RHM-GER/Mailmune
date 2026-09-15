@@ -987,19 +987,23 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   }
 
   const validated = account.ollamaValidated && account.ollamaModel === selected
-  // Merge recommended + installed into one de-duplicated option list.
-  const options: Array<{ tag: string; label: string; detail: string; recommended: boolean }> = []
+  // Merge recommended + installed into one de-duplicated option list. A
+  // recommended model that is not installed yet is flagged so the UI can show
+  // the install command instead of failing later with a bare 404.
+  const options: Array<{ tag: string; label: string; detail: string; recommended: boolean; installed: boolean }> = []
   const seen = new Set<string>()
   for (const model of recommended) {
     if (seen.has(model.tag)) continue
     seen.add(model.tag)
-    options.push({ tag: model.tag, label: model.label, detail: `${model.sizeClass} · empfohlen: ${model.rationale}`, recommended: true })
+    const isInstalled = installed.includes(model.tag)
+    options.push({ tag: model.tag, label: model.label, detail: `${model.sizeClass} · empfohlen: ${model.rationale}${isInstalled ? " · lokal installiert" : ""}`, recommended: true, installed: isInstalled })
   }
   for (const tag of installed) {
     if (seen.has(tag)) continue
     seen.add(tag)
-    options.push({ tag, label: tag, detail: "lokal installiert", recommended: false })
+    options.push({ tag, label: tag, detail: "lokal installiert", recommended: false, installed: true })
   }
+  const selectedOption = options.find((option) => option.tag === selected)
 
   return <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4">
     <div className="flex items-center gap-3">
@@ -1020,10 +1024,10 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
           <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
         </SelectTrigger>
         <SelectContent>
-          {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}</SelectItem>)}
+          {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}{!option.installed ? " – nicht installiert" : ""}</SelectItem>)}
         </SelectContent>
       </Select>
-      {selected && <p className="text-xs leading-5 text-[#666]">{options.find((option) => option.tag === selected)?.detail}</p>}
+      {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier den Fähigkeitstest erneut starten.</p>}</div>}
     </div>
 
     <div className="mt-3 flex flex-wrap gap-2">
