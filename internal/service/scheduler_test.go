@@ -107,3 +107,41 @@ func TestSchedulerReconcilesNewMailOverCycles(t *testing.T) {
 	}
 	sched.Stop()
 }
+
+func TestIdleWatcherTriggersScanOnNewMail(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, _ := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "idle-1")
+
+	// A long interval means the periodic ticker cannot fire during the test:
+	// any second scan can only come from the IDLE watcher.
+	sched := newScheduler(svc.scanner, svc.store, svc.hub, 30*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sched.Start(ctx)
+
+	// The initial cycle runs after a short startup delay and starts the watcher.
+	waitForScanRun(t, svc, account.ID)
+
+	// New mail arrives; the server pushes EXISTS to the idling watcher, which
+	// debounces and triggers an incremental scan on its own.
+	spamMessage(server, "Gewinn: sofort handeln", time.Now())
+
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		state, ok, _ := svc.store.FolderSyncState(context.Background(), account.ID, "INBOX")
+		if ok && state.LastUID >= 1 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	state, ok, _ := svc.store.FolderSyncState(context.Background(), account.ID, "INBOX")
+	if !ok || state.LastUID < 1 {
+		t.Fatalf("IDLE watcher did not trigger a scan: %+v ok=%v", state, ok)
+	}
+	runs, _ := svc.ScanRuns(context.Background(), account.ID, 10)
+	if len(runs) < 2 {
+		t.Fatalf("expected at least two scan runs (initial + IDLE-triggered), got %d", len(runs))
+	}
+	sched.Stop()
+}

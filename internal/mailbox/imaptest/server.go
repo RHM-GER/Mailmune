@@ -64,6 +64,9 @@ type Mailbox struct {
 	uidValidity uint32
 	nextUID     uint32
 	messages    []*Message
+	// tracker pushes unilateral updates (EXISTS) to idling sessions. It is
+	// created on the first SELECT and guarded by Server.mu.
+	tracker *imapserver.MailboxTracker
 }
 
 // Message is a single stored test message.
@@ -178,6 +181,9 @@ func (s *Server) AddMessage(folder, from, subject, body string, when time.Time, 
 	message := &Message{UID: box.nextUID, FromMailbox: mailboxName, FromHost: host, Subject: subject, MessageID: subject + "-" + when.Format("150405.000000") + "@test.invalid", InternalDate: when, HeaderExtra: headerExtra, Body: body}
 	box.nextUID++
 	box.messages = append(box.messages, message)
+	if box.tracker != nil {
+		box.tracker.QueueNumMessages(uint32(len(box.messages)))
+	}
 	return message.UID
 }
 
@@ -239,6 +245,7 @@ func splitAddress(address string) (string, string) {
 type session struct {
 	server   *Server
 	selected string
+	tracker  *imapserver.SessionTracker
 }
 
 var (
@@ -247,7 +254,13 @@ var (
 	_ imapserver.SessionIMAP4rev2 = (*session)(nil)
 )
 
-func (s *session) Close() error { return nil }
+func (s *session) Close() error {
+	if s.tracker != nil {
+		s.tracker.Close()
+		s.tracker = nil
+	}
+	return nil
+}
 
 func (s *session) Login(username, password string) error {
 	if username != Username || password != Password {
@@ -267,6 +280,14 @@ func (s *session) Select(mailbox string, _ *imap.SelectOptions) (*imap.SelectDat
 	if box == nil {
 		return nil, errors.New("no such mailbox")
 	}
+	if s.tracker != nil {
+		s.tracker.Close()
+		s.tracker = nil
+	}
+	if box.tracker == nil {
+		box.tracker = imapserver.NewMailboxTracker(uint32(len(box.messages)))
+	}
+	s.tracker = box.tracker.NewSession()
 	s.selected = mailbox
 	return &imap.SelectData{
 		Flags:          []imap.Flag{imap.FlagSeen, imap.FlagAnswered, imap.FlagFlagged},
@@ -322,13 +343,26 @@ func (s *session) Append(string, imap.LiteralReader, *imap.AppendOptions) (*imap
 	return nil, errors.New("append is not supported")
 }
 
-func (s *session) Poll(*imapserver.UpdateWriter, bool) error { return nil }
-func (s *session) Idle(_ *imapserver.UpdateWriter, stop <-chan struct{}) error {
-	<-stop
-	return nil
+func (s *session) Poll(w *imapserver.UpdateWriter, allowExpunge bool) error {
+	if s.tracker == nil {
+		return nil
+	}
+	return s.tracker.Poll(w, allowExpunge)
+}
+
+func (s *session) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
+	if s.tracker == nil {
+		<-stop
+		return nil
+	}
+	return s.tracker.Idle(w, stop)
 }
 
 func (s *session) Unselect() error {
+	if s.tracker != nil {
+		s.tracker.Close()
+		s.tracker = nil
+	}
 	s.selected = ""
 	return nil
 }
@@ -446,6 +480,10 @@ func (s *session) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest string
 		return errors.New("no matching messages")
 	}
 	box.messages = kept
+	// Note: the trackers are deliberately not updated for removals. The
+	// MailboxTracker panics on decreasing or zero EXISTS counts; the MOVE
+	// response itself carries the EXPUNGE data for the acting session, and
+	// tests only rely on EXISTS pushes for newly added messages.
 	if err := w.WriteCopyData(&imap.CopyData{UIDValidity: target.uidValidity, SourceUIDs: sourceUIDs, DestUIDs: destUIDs}); err != nil {
 		return err
 	}

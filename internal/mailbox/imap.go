@@ -83,6 +83,12 @@ func (m *Client) tlsConfig(host string) *tls.Config {
 }
 
 func (m *Client) connect(ctx context.Context, account domain.AccountConfig, password string) (*imapclient.Client, error) {
+	return m.connectWithHandler(ctx, account, password, nil)
+}
+
+// connectWithHandler establishes a verified TLS IMAP session. The optional
+// unilateral data handler receives server pushes (e.g. EXISTS during IDLE).
+func (m *Client) connectWithHandler(ctx context.Context, account domain.AccountConfig, password string, handler *imapclient.UnilateralDataHandler) (*imapclient.Client, error) {
 	if account.Port <= 0 {
 		account.Port = 993
 	}
@@ -105,7 +111,11 @@ func (m *Client) connect(ctx context.Context, account domain.AccountConfig, pass
 		rawConn.Close()
 		return nil, fmt.Errorf("secure IMAP connection: %w", err)
 	}
-	client := imapclient.New(tlsConn, nil)
+	var options *imapclient.Options
+	if handler != nil {
+		options = &imapclient.Options{UnilateralDataHandler: handler}
+	}
+	client := imapclient.New(tlsConn, options)
 	if err := client.Login(account.Username, password).Wait(); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("IMAP login: %w", err)
