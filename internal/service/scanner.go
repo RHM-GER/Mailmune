@@ -85,6 +85,19 @@ func (s *Scanner) RecoverInterrupted(ctx context.Context) (int64, error) {
 // is true, the stored UID state of the inbox folder is dropped first, so the
 // whole mailbox is re-read (decisions stay deduplicated by idempotency keys).
 func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) (domain.ScanRun, error) {
+	return s.startScan(ctx, accountID, resync, false)
+}
+
+// StartDeepScan re-reads every message received since the account's last deep
+// scan (the last 7 days when none ran yet) and reviews all of them with the
+// validated local model, like an explicit full rescan does. Missed weekly
+// appointments catch up exactly once: the window always reaches back to the
+// last successful deep scan. Triggered by the weekly schedule or manually.
+func (s *Scanner) StartDeepScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
+	return s.startScan(ctx, accountID, true, true)
+}
+
+func (s *Scanner) startScan(ctx context.Context, accountID string, resync, deep bool) (domain.ScanRun, error) {
 	account, err := s.store.Account(ctx, accountID)
 	if err != nil {
 		return domain.ScanRun{}, fmt.Errorf("account not found: %w", err)
@@ -123,7 +136,7 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) 
 	s.mu.Unlock()
 
 	s.publish("scan.started", ScanEvent{Run: run})
-	go s.execute(runCtx, entry.done, account, password, run, resync)
+	go s.execute(runCtx, entry.done, account, password, run, resync, deep)
 	return run, nil
 }
 
@@ -160,7 +173,7 @@ func (s *Scanner) Wait(accountID string, timeout time.Duration) bool {
 	}
 }
 
-func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool) {
+func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool) {
 	defer close(done)
 	defer func() {
 		s.mu.Lock()
@@ -168,7 +181,7 @@ func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domai
 		s.mu.Unlock()
 	}()
 
-	result := s.scanAccount(ctx, account, password, run, aiAll)
+	result := s.scanAccount(ctx, account, password, run, aiAll, deep)
 
 	runRow, _, err := s.store.ScanRun(context.Background(), run.ID)
 	if err != nil {
@@ -215,7 +228,7 @@ func (s *Scanner) buildScorer(ctx context.Context, accountID string) *learning.M
 	}
 }
 
-func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool) scanResult {
+func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool) scanResult {
 	result := scanResult{}
 	folder := account.InboxFolder
 
@@ -229,9 +242,20 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// for the ambiguous band so live detection of new mail stays fast.
 	aiAll = aiAll || (prev.UIDValidity == 0 && prev.LastUID == 0)
 
+	// A deep scan is date-bounded: it re-reads everything since the last deep
+	// scan (default window: 7 days) instead of the whole history.
+	var deepSince time.Time
+	if deep {
+		deepSince = time.Now().UTC().AddDate(0, 0, -7)
+		if account.LastDeepScanAt != nil && account.LastDeepScanAt.After(deepSince) {
+			deepSince = *account.LastDeepScanAt
+		}
+	}
+
 	progressCounter := 0
 	opts := mailbox.SyncOptions{
 		MaxMessages: mailbox.DefaultMaxMessages,
+		Since:       deepSince,
 		FetchText:   true,
 		OnProgress: func(processed, estimatedTotal int) {
 			progressCounter++
@@ -358,6 +382,11 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	switch {
 	case syncErr == nil:
 		account.LastScanAt = ptrTime(time.Now().UTC())
+		if deep {
+			// Bound the next deep scan window; a failed deep scan leaves the old
+			// value untouched so the missed window is caught up on the retry.
+			account.LastDeepScanAt = ptrTime(time.Now().UTC())
+		}
 		account.UpdatedAt = time.Now().UTC()
 		_ = s.store.UpsertAccount(context.Background(), account)
 		// Feed the dashboard statistics: everything scanned today plus any

@@ -77,6 +77,12 @@ export interface Account {
   ollamaValidated: boolean
   enabled: boolean
   dryRun: boolean
+  // Wöchentlicher KI-Tiefscan: Zeitplan in lokaler Zeit (0=Sonntag..6=Samstag).
+  // deepScan=false deaktiviert den Zeitplan; die Felder fehlen bei älteren Agenten.
+  deepScan?: boolean
+  deepScanWeekday?: number
+  deepScanHour?: number
+  lastDeepScanAt?: string
   profile: {
     purpose: string
     industry: string

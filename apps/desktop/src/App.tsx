@@ -803,6 +803,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
+  const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
   // Aktives Konto: das erste nicht ausgeblendete, sonst das erste überhaupt.
   const activeAccount = accounts.find((item) => !hiddenAccounts.includes(item.id)) ?? accounts[0]
@@ -864,6 +865,32 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
       // Ohne Agent bleibt die lokale Auswahl erhalten.
     }
   }
+  // Wochenprüfung = wöchentlicher KI-Tiefscan des Agenten. Der Zeitplan liegt
+  // serverseitig am Konto; ohne verbundenes Postfach (Browser-Demo) bleibt der
+  // Schalter lokal. Standard bei Aktivierung: Freitag 16:00 Uhr.
+  const weekdayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"]
+  const deepScanWeekday = (activeAccount?.deepScanWeekday ?? -1) >= 0 ? activeAccount!.deepScanWeekday! : 5
+  const deepScanHour = (activeAccount?.deepScanHour ?? -1) >= 0 ? activeAccount!.deepScanHour! : 16
+  const deepScanEnabled = activeAccount ? Boolean(activeAccount.deepScan) : weeklyReviewEnabled
+  const deepScanDetail = activeAccount?.deepScan
+    ? `${weekdayNames[deepScanWeekday]}s, ${String(deepScanHour).padStart(2, "0")}:00 Uhr · KI prüft alle Mails seit der letzten Wochenprüfung`
+    : "Wöchentlich alle Mails seit der letzten Prüfung mit KI"
+  const persistDeepScan = async (patch: Partial<Account>) => {
+    if (!activeAccount) {
+      if (patch.deepScan !== undefined) setWeeklyReviewEnabled(patch.deepScan)
+      return
+    }
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: { ...activeAccount, ...patch } })
+      await refresh()
+    } catch {
+      // Ohne Agent bleibt der lokale Zustand erhalten.
+    }
+  }
+  const toggleDeepScan = (enabled: boolean) => {
+    if (enabled) setDeepScanEditorOpen(true)
+    void persistDeepScan({ deepScan: enabled, deepScanWeekday, deepScanHour })
+  }
   const settingsSections = [
     { id: "settings-app", label: "App-Einstellungen" }, { id: "settings-filter", label: "Filterverhalten" }, { id: "settings-folder", label: "Ordner" },
     { id: "settings-scan", label: "Automatische Prüfung" }, { id: "settings-account", label: "Postfach" }, { id: "settings-model", label: "KI-Modell" }, { id: "settings-security", label: "Sicherheit" },
@@ -886,7 +913,13 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
         {editingFolder ? <input autoFocus aria-label="Ordnername" className="h-12 w-full rounded-[10px] border border-white/20 bg-[#242424] px-3.5 text-sm text-white outline-none focus:border-white/35" value={folderDraft} onChange={(event) => setFolderDraft(event.target.value)} /> : <button onClick={() => { setFolderDraft(folderName); setEditingFolder(true) }} className="flex h-12 w-full items-center justify-between rounded-[10px] border border-white/10 bg-[#242424] px-3.5 text-sm text-white/40 transition-colors hover:border-white/20 hover:text-white/70"><span>{folderName}</span><Pencil className="size-4" /></button>}
       </div>
       <div className="my-6 border-t border-white/[0.09]" />
-      <div data-section-id="settings-scan" className="border-b border-white/[0.09] pb-6"><h2 className="mb-3 text-sm font-medium">Automatische Prüfung</h2><div className="space-y-3"><ConnectionCard icon={CalendarDays} title="Wochenprüfung" detail="Freitags, 16:00 Uhr" enabled={weeklyReviewEnabled} onEnabled={setWeeklyReviewEnabled} onSettings={() => {}} /><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={setIncomingReviewEnabled} onSettings={() => {}} /></div></div>
+      <div data-section-id="settings-scan" className="border-b border-white/[0.09] pb-6"><h2 className="mb-3 text-sm font-medium">Automatische Prüfung</h2><div className="space-y-3"><ConnectionCard icon={CalendarDays} title="Wochenprüfung" detail={deepScanDetail} enabled={deepScanEnabled} onEnabled={toggleDeepScan} onSettings={() => setDeepScanEditorOpen((open) => !open)}>
+        {deepScanEditorOpen && <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/[0.07] pt-4">
+          <div><label className="mb-1.5 block text-xs text-[#888]">Wochentag</label><Select value={String(deepScanWeekday)} onValueChange={(value) => void persistDeepScan({ deepScanWeekday: Number(value) })}><SelectTrigger className="h-10! w-full rounded-[10px] border-white/10 bg-[#242424] px-3 text-sm"><SelectValue>{weekdayNames[deepScanWeekday]}</SelectValue></SelectTrigger><SelectContent>{weekdayNames.map((name, index) => <SelectItem key={name} value={String(index)}>{name}</SelectItem>)}</SelectContent></Select></div>
+          <div><label className="mb-1.5 block text-xs text-[#888]">Uhrzeit</label><Select value={String(deepScanHour)} onValueChange={(value) => void persistDeepScan({ deepScanHour: Number(value) })}><SelectTrigger className="h-10! w-full rounded-[10px] border-white/10 bg-[#242424] px-3 text-sm"><SelectValue>{String(deepScanHour).padStart(2, "0")}:00</SelectValue></SelectTrigger><SelectContent>{Array.from({ length: 24 }, (_, hour) => <SelectItem key={hour} value={String(hour)}>{String(hour).padStart(2, "0")}:00</SelectItem>)}</SelectContent></Select></div>
+          {activeAccount && !activeAccount.ollamaValidated && <p className="col-span-2 text-xs leading-5 text-[#888]">Ohne validiertes KI-Modell prüft die Wochenprüfung nur mit Regeln und Statistik – verpasste Termine holt der Agent automatisch nach.</p>}
+        </div>}
+      </ConnectionCard><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={setIncomingReviewEnabled} onSettings={() => {}} /></div></div>
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.filter((account) => !hiddenAccounts.includes(account.id)).length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>

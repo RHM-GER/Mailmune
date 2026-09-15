@@ -36,6 +36,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 - [ ] Echter STRATO-Trockenlauf mit mindestens 100 manuell geprüften Entscheidungen
 - [x] IMAP-IDLE plus zehnminütiger Abgleich und Reconnect mit Backoff/Jitter
+- [x] Wöchentlicher KI-Tiefscan zur konfigurierbaren Uhrzeit (je Postfach, verpasste Termine holt der Agent nach; Fenster reicht bis zum letzten Tiefscan, manuell per API auslösbar)
 - [x] UID-basierte Synchronisierung mit sicherem Resync bei UIDVALIDITY-Wechsel und idempotenten Entscheidungen
 - [ ] Credential Manager produktiv prüfen; Secret-Service- und Keychain-Adapter vorbereiten
 - [x] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
@@ -56,6 +57,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Export des Lernwissens aus der UI (anonymisiert, mit Herkunft/Version)
 - [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
 - [x] Lokales Modell mit datenschutzsicherem Profil-Kontext versorgen („RAG light": diskriminative Tokens und Absenderdomains aus bestätigten Reviews, niemals Rohtext oder vollständige Adressen, strikt je Postfach)
+- [x] DMARC-ähnliches Envelope-Alignment: authentifizierte Markenmails (eigene Domain + passender Return-Path) erhalten ein starkes Vertrauenssignal; Subdomains und Marken-Geschwister zählen nicht als sender_mismatch; KI-Voten können starke Vertrauenssignale nicht in die Prüfliste heben
 - [x] Fähigkeitstest als feste Proben-Suite umsetzen (persistierte Validierung je Konto, Empfehlungsliste in der UI)
 - [ ] Reproduzierbaren Modellvergleich für 16-GB-Laptops umsetzen
 - [ ] Wissen vom Modell entkoppeln: Profil, Regeln, Statistik und Beispiele bleiben modellunabhängig

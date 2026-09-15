@@ -48,6 +48,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	// /scan stays as a compatibility alias for starting a background run.
 	mux.HandleFunc("POST /v1/accounts/{id}/scan", s.startScan)
 	mux.HandleFunc("POST /v1/accounts/{id}/scans", s.startScan)
+	mux.HandleFunc("POST /v1/accounts/{id}/scans/deep", s.startDeepScan)
 	mux.HandleFunc("POST /v1/accounts/{id}/scans/cancel", s.cancelScan)
 	mux.HandleFunc("GET /v1/accounts/{id}/scans", s.scanRuns)
 	mux.HandleFunc("GET /v1/accounts/{id}/calibration", s.calibration)
@@ -142,6 +143,12 @@ func (s *Server) startScan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	value, err := s.service.StartScan(r.Context(), r.PathValue("id"), req.Resync)
+	respond(w, "scan_start_failed", value, err)
+}
+
+// startDeepScan triggers the weekly AI deep scan manually.
+func (s *Server) startDeepScan(w http.ResponseWriter, r *http.Request) {
+	value, err := s.service.StartDeepScan(r.Context(), r.PathValue("id"))
 	respond(w, "scan_start_failed", value, err)
 }
 func (s *Server) cancelScan(w http.ResponseWriter, r *http.Request) {

@@ -172,6 +172,20 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_move_ops_account ON move_operations(account_id, state)`,
 		},
 	},
+	{
+		id:   6,
+		name: "deep_scan_schedule",
+		stmts: []string{
+			// Weekly AI deep scan schedule per account. The enabled flag makes
+			// the zero value unambiguously "off". Weekday/hour are local wall
+			// time. last_deep_scan_at bounds the next deep scan so missed
+			// appointments catch up exactly once.
+			`ALTER TABLE accounts ADD COLUMN deep_scan_enabled INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE accounts ADD COLUMN deep_scan_weekday INTEGER NOT NULL DEFAULT -1`,
+			`ALTER TABLE accounts ADD COLUMN deep_scan_hour INTEGER NOT NULL DEFAULT -1`,
+			`ALTER TABLE accounts ADD COLUMN last_deep_scan_at TEXT`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

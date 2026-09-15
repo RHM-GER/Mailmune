@@ -146,6 +146,23 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 	default:
 		return a, errors.New("unsupported safety mode")
 	}
+	// The weekly deep scan schedule is optional. The explicit flag keeps the
+	// zero value of weekday/hour unambiguously "off"; when disabled, the
+	// schedule fields are normalized so stored state never disagrees.
+	if !a.DeepScan {
+		a.DeepScanWeekday, a.DeepScanHour = -1, -1
+	} else {
+		if a.DeepScanWeekday < 0 || a.DeepScanWeekday > 6 || a.DeepScanHour < 0 || a.DeepScanHour > 23 {
+			return a, errors.New("deep scan schedule out of range")
+		}
+	}
+	if !isNew {
+		if existing, err := s.store.Account(ctx, a.ID); err == nil {
+			// Scanner-owned operational state: never let a client payload move
+			// the deep scan window boundary.
+			a.LastDeepScanAt = existing.LastDeepScanAt
+		}
+	}
 	if !isNew && !a.DryRun {
 		// Leaving the dry run enables real moves. The handoff requires proven
 		// calibration first: at least 20 reviewed decisions at the auto-move
@@ -215,6 +232,13 @@ func (s *Service) TestAccount(ctx context.Context, id string) (mailbox.Connectio
 // resync=true the stored UID state is dropped first for a full re-read.
 func (s *Service) StartScan(ctx context.Context, accountID string, resync bool) (domain.ScanRun, error) {
 	return s.scanner.StartScan(ctx, accountID, resync)
+}
+
+// StartDeepScan triggers the weekly AI deep scan manually: every message
+// since the last deep scan (default window 7 days) is re-read and reviewed
+// with the validated local model.
+func (s *Service) StartDeepScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
+	return s.scanner.StartDeepScan(ctx, accountID)
 }
 
 // CancelScan requests cancellation of the account's active run.

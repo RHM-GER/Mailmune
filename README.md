@@ -8,6 +8,7 @@ Mailmune ist ein lokaler IMAP-Spamfilter mit menschlicher Abnahme. Die Anwendung
 - Go-Agent mit lokaler, token-geschützter Loopback-API und SQLite (WAL, Foreign Keys, nummerierte vorwärtslaufende Migrationen)
 - UID-basierte, ausschließlich lesende IMAP-Synchronisierung mit sicherer Re-Synchronisierung bei `UIDVALIDITY`-Wechsel
 - **Dauerbetrieb**: IMAP-IDLE für Live-Erkennung neuer Mails plus 10-Minuten-UID-Abgleich als Sicherheitsnetz; Reconnect mit exponentiellem Backoff und Jitter
+- **Wöchentlicher KI-Tiefscan**: zur konfigurierbaren Uhrzeit (je Postfach, lokale Zeit) werden alle Mails seit dem letzten Tiefscan erneut mit dem validierten lokalen Modell geprüft; verpasste Termine holt der Agent automatisch nach
 - Hintergrundscans je Konto mit Fortschritt, Abbruch, Wiederaufnahme nach Neustart und SSE-Eventstream in die UI
 - Dreistufige Klassifikation:
   1. deterministische Regelpipeline mit generischen Heuristiken (maschinell erzeugte Absenderdomains, Ziffernmuster, Druck-/Lock-/Bestätigungs-/Finanzsprache, Betreff-Anomalien) und stabilen Evidence-Codes ([docs/evidence-codes.md](docs/evidence-codes.md))

@@ -156,7 +156,21 @@ func (s *Scheduler) runCycle(ctx context.Context) {
 }
 
 func (s *Scheduler) reconcileAccount(ctx context.Context, account domain.AccountConfig) {
-	// Incremental reconciliation; resync=false keeps the persisted UID state.
+	// The weekly AI deep scan takes precedence when its appointment is due or
+	// was missed; it re-reads everything since the last deep scan. Otherwise a
+	// plain incremental reconciliation runs; resync=false keeps the persisted
+	// UID state. StartScan/StartDeepScan are serialized per account, so an
+	// already running scan is never doubled.
+	if deepScanDue(account, time.Now()) {
+		if _, err := s.scanner.StartDeepScan(ctx, account.ID); err != nil {
+			s.publishError(account.ID, err)
+			return
+		}
+		if s.hub != nil {
+			s.hub.Publish("schedule.deep_scan", map[string]string{"accountId": account.ID})
+		}
+		return
+	}
 	if _, err := s.scanner.StartScan(ctx, account.ID, false); err != nil {
 		s.publishError(account.ID, err)
 		return
@@ -164,6 +178,27 @@ func (s *Scheduler) reconcileAccount(ctx context.Context, account domain.Account
 	if s.hub != nil {
 		s.hub.Publish("schedule.reconcile", map[string]string{"accountId": account.ID})
 	}
+}
+
+// deepScanDue reports whether the account's weekly AI deep scan appointment
+// has passed and has not been fulfilled since. The schedule is local wall
+// time; a missed appointment (e.g. the agent was off over the weekend) stays
+// due until one deep scan completes, and its window reaches back to the last
+// successful deep scan so nothing is skipped.
+func deepScanDue(account domain.AccountConfig, now time.Time) bool {
+	if !account.Enabled || !account.DeepScan || account.DeepScanWeekday < 0 || account.DeepScanWeekday > 6 || account.DeepScanHour < 0 || account.DeepScanHour > 23 {
+		return false
+	}
+	local := now.Local()
+	weekday := time.Weekday(account.DeepScanWeekday)
+	// Most recent occurrence of the configured weekday/hour, seen from now.
+	scheduled := time.Date(local.Year(), local.Month(), local.Day(), account.DeepScanHour, 0, 0, 0, local.Location())
+	daysBack := (int(local.Weekday()) - int(weekday) + 7) % 7
+	scheduled = scheduled.AddDate(0, 0, -daysBack)
+	if scheduled.After(now) {
+		return false
+	}
+	return account.LastDeepScanAt == nil || account.LastDeepScanAt.Before(scheduled.UTC())
 }
 
 func (s *Scheduler) publishError(accountID string, err error) {

@@ -35,6 +35,17 @@ type AccountConfig struct {
 	OllamaValidated bool           `json:"ollamaValidated"`
 	Enabled         bool           `json:"enabled"`
 	DryRun          bool           `json:"dryRun"`
+	// DeepScan enables the weekly AI deep scan; DeepScanWeekday/DeepScanHour
+	// schedule it in local time (weekday: 0=Sunday..6=Saturday, hour: 0..23).
+	// The flag makes the zero value of the schedule fields unambiguously
+	// "off", so old clients never enable a deep scan by omission. The deep
+	// scan re-reads every message received since LastDeepScanAt (at most the
+	// last 7 days on the first run) and reviews all of them with the local
+	// model when one is validated.
+	DeepScan        bool           `json:"deepScan"`
+	DeepScanWeekday int            `json:"deepScanWeekday"`
+	DeepScanHour    int            `json:"deepScanHour"`
+	LastDeepScanAt  *time.Time     `json:"lastDeepScanAt,omitempty"`
 	LastScanAt      *time.Time     `json:"lastScanAt,omitempty"`
 	CreatedAt       time.Time      `json:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt"`

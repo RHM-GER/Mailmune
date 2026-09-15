@@ -48,7 +48,7 @@
     },
     "Account": {
       "type": "object",
-      "required": ["id", "name", "host", "port", "username", "secretRef", "inboxFolder", "sentFolder", "spamFolder", "safetyMode", "ollamaValidated", "enabled", "dryRun", "createdAt", "updatedAt", "profile"],
+      "required": ["id", "name", "host", "port", "username", "secretRef", "inboxFolder", "sentFolder", "spamFolder", "safetyMode", "ollamaValidated", "enabled", "dryRun", "deepScan", "deepScanWeekday", "deepScanHour", "createdAt", "updatedAt", "profile"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
@@ -64,6 +64,10 @@
         "ollamaValidated": { "type": "boolean" },
         "enabled": { "type": "boolean" },
         "dryRun": { "type": "boolean", "description": "Neue Konten sind immer true; automatische Aktionen erfordern eine spätere ausdrückliche Änderung." },
+        "deepScan": { "type": "boolean", "description": "Aktiviert den wöchentlichen KI-Tiefscan; ohne dieses Flag sind Wochentag/Stunde bedeutungslos." },
+        "deepScanWeekday": { "type": "integer", "minimum": -1, "maximum": 6, "description": "Wochentag des wöchentlichen KI-Tiefscans in lokaler Zeit (0=Sonntag..6=Samstag); -1 deaktiviert." },
+        "deepScanHour": { "type": "integer", "minimum": -1, "maximum": 23, "description": "Stunde des wöchentlichen KI-Tiefscans in lokaler Zeit (0..23); -1 deaktiviert." },
+        "lastDeepScanAt": { "type": "string", "format": "date-time", "description": "Letzter erfolgreicher Tiefscan; begrenzt das Fenster des nächsten." },
         "lastScanAt": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" },
