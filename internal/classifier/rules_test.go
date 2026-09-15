@@ -271,6 +271,85 @@ func TestBrandImpersonationAndReturnPathMismatch(t *testing.T) {
 	}
 }
 
+func TestAlignedBrandWithAuthIsTrustedNotMismatched(t *testing.T) {
+	rules := NewRules()
+
+	// Genuine brand mail: canonical domain, aligned envelope (subdomain),
+	// authentication passed. Must be trusted and stay out of the review list.
+	genuine := rules.Classify(domain.MessageFeatures{
+		From: "businessprofile-noreply@google.com", FromDomain: "google.com",
+		ReturnPath: "bounce@accounts.google.com", AuthenticationPassed: true,
+		Subject: "Code zur Bestätigung des Unternehmens",
+	}, domain.MailboxProfile{})
+	if findEvidence(genuine.Evidence, CodeBrandAligned) == nil {
+		t.Fatalf("brand_aligned evidence missing: %+v", genuine.Evidence)
+	}
+	if !genuine.StrongTrustSignal {
+		t.Fatal("aligned authenticated brand mail must create a strong trust signal")
+	}
+	if findEvidence(genuine.Evidence, CodeSenderMismatch) != nil {
+		t.Fatalf("subdomain envelope must not trigger sender_mismatch: %+v", genuine.Evidence)
+	}
+	if genuine.Score >= CandidateThreshold {
+		t.Fatalf("genuine brand mail must stay below review threshold, got %.2f", genuine.Score)
+	}
+
+	// Brand siblings count as aligned (google.com vs googlemail.com).
+	sibling := rules.Classify(domain.MessageFeatures{
+		From: "team@google.com", FromDomain: "google.com",
+		ReturnPath: "no-reply@googlemail.com", AuthenticationPassed: true,
+		Subject: "Ihre Anfrage",
+	}, domain.MailboxProfile{})
+	if findEvidence(sibling.Evidence, CodeSenderMismatch) != nil {
+		t.Fatalf("brand sibling envelope must not trigger sender_mismatch: %+v", sibling.Evidence)
+	}
+	if findEvidence(sibling.Evidence, CodeBrandAligned) == nil {
+		t.Fatalf("brand sibling alignment missing: %+v", sibling.Evidence)
+	}
+
+	// Spoofed brand: From claims google.com but the envelope does not align.
+	// The mismatch fires and no trust is granted.
+	spoofed := rules.Classify(domain.MessageFeatures{
+		From: "service@google.com", FromDomain: "google.com",
+		ReturnPath: "bounce@evil.example", AuthenticationPassed: true,
+		Subject: "Konto bestätigen",
+	}, domain.MailboxProfile{})
+	if findEvidence(spoofed.Evidence, CodeSenderMismatch) == nil {
+		t.Fatalf("envelope mismatch must fire for spoofed brand mail: %+v", spoofed.Evidence)
+	}
+	if findEvidence(spoofed.Evidence, CodeBrandAligned) != nil {
+		t.Fatalf("misaligned envelope must not grant brand trust: %+v", spoofed.Evidence)
+	}
+	if spoofed.StrongTrustSignal {
+		t.Fatal("spoofed brand mail must not create a strong trust signal")
+	}
+
+	// Without passed authentication no brand trust is granted, even when the
+	// envelope aligns: SPF/DKIM are what make the envelope believable.
+	unauthenticated := rules.Classify(domain.MessageFeatures{
+		From: "team@google.com", FromDomain: "google.com",
+		ReturnPath: "bounce@accounts.google.com",
+		Subject:      "Ihre Anfrage",
+	}, domain.MailboxProfile{})
+	if findEvidence(unauthenticated.Evidence, CodeBrandAligned) != nil {
+		t.Fatalf("unauthenticated mail must not gain brand trust: %+v", unauthenticated.Evidence)
+	}
+}
+
+func TestMachineGeneratedDomainAloneReachesThreshold(t *testing.T) {
+	rules := NewRules()
+	result := rules.Classify(domain.MessageFeatures{
+		From: "postfach@tvprodukt55diehohle.de", FromDomain: "tvprodukt55diehohle.de",
+		Subject: "Tschüss Bauchfett! Willkommen Wohlgefühl!",
+	}, domain.MailboxProfile{})
+	if findEvidence(result.Evidence, CodeMachineGenerated) == nil {
+		t.Fatalf("machine_generated evidence missing: %+v", result.Evidence)
+	}
+	if result.Score < CandidateThreshold {
+		t.Fatalf("machine-generated sender domain must reach the review threshold on its own, got %.2f", result.Score)
+	}
+}
+
 func withSubject(msg domain.MessageFeatures, subject string) domain.MessageFeatures {
 	msg.Subject = subject
 	return msg

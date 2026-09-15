@@ -31,6 +31,7 @@ const (
 	CodeSpoofedSender        = "spoofed_sender"
 	CodeSenderMismatch       = "sender_mismatch"
 	CodeBrandImpersonation   = "brand_impersonation"
+	CodeBrandAligned         = "brand_aligned_domain"
 	CodeSuspiciousLinks      = "suspicious_links"
 	CodeURLShortener         = "url_shortener"
 	CodeListUnsubscribe      = "list_unsubscribe"
@@ -141,6 +142,14 @@ func (r *Rules) stageTrust(msg domain.MessageFeatures, profile domain.MailboxPro
 		strongTrust = true
 		*evidence = append(*evidence, domain.Evidence{Group: "relationship", Code: CodeAllowDomain, Weight: -0.8, Summary: "Domain steht auf der Vertrauensliste"})
 	}
+	// A known brand's own domain with an aligned envelope (Return-Path on the
+	// same domain or a brand sibling) and passed authentication really is that
+	// brand: the envelope is set by the delivering MTA and cannot be forged in
+	// the message headers. This is DMARC-style alignment as a trust signal.
+	if msg.AuthenticationPassed && isCanonicalBrand(msg.FromDomain) && envelopeAligned(msg.FromDomain, msg.ReturnPath) {
+		strongTrust = true
+		*evidence = append(*evidence, domain.Evidence{Group: "authentication", Code: CodeBrandAligned, Weight: -0.7, Summary: "Bekannte Marke mit passender Envelope-Adresse und bestandener Authentifizierung"})
+	}
 	return strongTrust
 }
 
@@ -177,7 +186,7 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSenderDigitPattern, Weight: 0.6, Summary: "Maschinell erzeugte Absenderdomain mit langen Ziffernfolgen"})
 	}
 	if machineGeneratedLabel(senderDomain) {
-		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeMachineGenerated, Weight: 0.45, Summary: "Absenderdomain wirkt automatisch zusammengesetzt (unübliche Länge/Ziffern/Vokalanteil)"})
+		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeMachineGenerated, Weight: 0.6, Summary: "Absenderdomain wirkt automatisch zusammengesetzt (unübliche Länge/Ziffern/Vokalanteil)"})
 	}
 	// An incoming message whose From claims the account owner's own domain is
 	// very likely spoofed (e.g. sextortion forging the victim's address). The
@@ -188,7 +197,7 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 	// Envelope sender (Return-Path) versus From: the envelope is set by the
 	// delivering MTA while From is free text a spammer chooses arbitrarily. A
 	// domain mismatch outside of mailing lists is a classic spoofing hint.
-	if returnDomain := ExtractDomain(msg.ReturnPath); returnDomain != "" && returnDomain != senderDomain && !msg.ListUnsubscribe {
+	if ExtractDomain(msg.ReturnPath) != "" && !envelopeAligned(senderDomain, msg.ReturnPath) && !msg.ListUnsubscribe {
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSenderMismatch, Weight: 0.35, Summary: "Return-Path weicht vom From-Absender ab (Envelope-/Header-Mismatch)"})
 	}
 	// Brand impersonation: the domain carries a commonly forged trademark but
@@ -240,6 +249,54 @@ func impersonatedBrand(senderDomain string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// isCanonicalBrand reports whether the domain is one of a known brand's own
+// domains (or a subdomain thereof), e.g. google.com or accounts.google.com.
+func isCanonicalBrand(senderDomain string) bool {
+	for _, brand := range brandTokens {
+		for _, own := range brand.own {
+			if senderDomain == own || strings.HasSuffix(senderDomain, "."+own) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// envelopeAligned implements DMARC-style relaxed alignment between the From
+// domain and the Return-Path envelope domain. Subdomains of each other and
+// brand siblings (google.com vs googlemail.com) count as aligned; everything
+// else is a mismatch worth evidence.
+func envelopeAligned(fromDomain, returnPath string) bool {
+	returnDomain := strings.ToLower(strings.TrimSpace(ExtractDomain(returnPath)))
+	fromDomain = strings.ToLower(strings.TrimSpace(fromDomain))
+	if returnDomain == "" || fromDomain == "" {
+		return false
+	}
+	if returnDomain == fromDomain || strings.HasSuffix(returnDomain, "."+fromDomain) || strings.HasSuffix(fromDomain, "."+returnDomain) {
+		return true
+	}
+	return sameBrand(fromDomain, returnDomain)
+}
+
+// sameBrand reports whether both domains belong to the same known brand.
+func sameBrand(first, second string) bool {
+	for _, brand := range brandTokens {
+		fm, sm := false, false
+		for _, own := range brand.own {
+			if first == own || strings.HasSuffix(first, "."+own) {
+				fm = true
+			}
+			if second == own || strings.HasSuffix(second, "."+own) {
+				sm = true
+			}
+		}
+		if fm && sm {
+			return true
+		}
+	}
+	return false
 }
 
 // machineGeneratedLabel reports whether a domain label looks concatenated or

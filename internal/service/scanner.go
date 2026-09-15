@@ -407,10 +407,16 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 		// to auto-move, so the LLM alone never moves mail.
 		switch {
 		case verdict.Score >= 0.7:
-			// Confident verdict: at least into the review list.
+			// Confident verdict: at least into the review list - unless the rules
+			// found a strong trust signal (e.g. authenticated canonical brand
+			// domain). Small local models are known to misjudge genuine brand
+			// mail as spam; trust signals must not be floor-lifted into the
+			// review list by the model alone.
 			blended := classification.Score*0.5 + verdict.Score*0.5
-			if floor := classifier.CandidateThreshold + 0.05; blended < floor {
-				blended = floor
+			if !classification.StrongTrustSignal {
+				if floor := classifier.CandidateThreshold + 0.05; blended < floor {
+					blended = floor
+				}
 			}
 			if blended > classification.Score {
 				classification.Score = blended
@@ -424,7 +430,23 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 		// extra independent group still count.
 		classification.IndependentGroups++
 	}
+	// A strong trust signal caps the score below the review threshold: genuine
+	// authenticated brand mail or explicitly trusted senders must not end up as
+	// spam candidates just because the model or a weak heuristic disagrees.
+	// Explicit deny rules still win over implicit trust.
+	if classification.StrongTrustSignal && classification.Score >= classifier.CandidateThreshold && !hasDenyEvidence(classification.Evidence) {
+		classification.Score = classifier.CandidateThreshold - 0.01
+	}
 	return true
+}
+
+func hasDenyEvidence(evidence []domain.Evidence) bool {
+	for _, item := range evidence {
+		if item.Group == "rules" && item.Weight > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scanner) finish(runID string, status domain.ScanStatus, errMsg string) {

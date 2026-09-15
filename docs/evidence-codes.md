@@ -17,6 +17,7 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `rules` | `deny_keyword` | Spam | Gesperrtes Schlüsselwort in Betreff oder Text |
 | `authentication` | `auth_pass` | Ham | Plausible SPF/DKIM/DMARC-Pass-Hinweise (untrusted Input, nur schwaches Signal) |
 | `authentication` | `auth_fail` | Spam | SPF/DKIM/DMARC-Fail-Hinweise (untrusted Input) |
+| `authentication` | `brand_aligned_domain` | Ham | Bekannte Marke sendet von ihrer eigenen Domain mit passend ausgerichteter Envelope-Adresse (Return-Path) und bestandener Authentifizierung – DMARC-ähnliches Alignment als Vertrauenssignal |
 | `content` | `pressure_language` | Spam | Druck- oder Drohformulierung (sofort handeln, Sperrung, letzte Warnung …) |
 | `content` | `reward_bait` | Spam | Lockangebot (Gewinn, Geschenk, Bonus, „Sie gehören zu den …“) |
 | `content` | `verification_request` | Spam | Aufforderung, Identität/Zugangsdaten zu bestätigen oder zu aktualisieren |
@@ -28,7 +29,7 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `sender_integrity` | `sender_digit_pattern` | Spam | Absenderdomain mit langen Ziffernfolgen (≥ 4) – maschinell erzeugt |
 | `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
 | `sender_integrity` | `spoofed_sender` | Spam | Eingehende Mail gibt die eigene Kontodomain als Absender an – sehr wahrscheinlich gefälscht (Spoofing, z. B. Sextortion) |
-| `sender_integrity` | `sender_mismatch` | Spam | Return-Path (Envelope) weicht vom From-Header ab – Spoofing-Hinweis (Mailinglisten ausgenommen) |
+| `sender_integrity` | `sender_mismatch` | Spam | Return-Path (Envelope) weicht vom From-Header ab – Spoofing-Hinweis. Nicht gewertet wird DMARC-ähnliches Alignment: Subdomains voneinander und Domains derselben bekannten Marke (z. B. google.com/googlemail.com) gelten als passend; Mailinglisten sind ausgenommen |
 | `sender_integrity` | `brand_impersonation` | Spam | Absenderdomain enthält eine bekannte Marke (PayPal, ADAC, Telekom …), ohne deren eigene Domain zu sein |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
@@ -43,7 +44,11 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 - `Authentication-Results` wird nur als nicht vertrauenswürdiges Eingangssignal
   verwendet und niemals als Beweis.
 - Ein starkes Vertrauenssignal (`StrongTrustSignal`) begrenzt den Score und
-  verhindert automatische Verschiebungen.
+  verhindert automatische Verschiebungen. Nach einer KI-Prüfung hält es die
+  Mail außerdem unterhalb der Review-Schwelle (60 %): Ein Modell-Votum allein
+  kann eine authentifizierte, envelope-ausgerichtete Marken- oder explizit
+  vertraute Mail nicht in die Verdachtsliste heben. Explizite Sperrlisten
+  (Deny-Regeln) stechen implizites Vertrauen weiterhin aus.
 - Der statistische Lerner wird ausschließlich aus menschlich bestätigten
   Reviews trainiert; ein Modell darf erst ab 20 bestätigten Beispielen und nur
   mit Beispielen aus beiden Klassen Beiträge liefern.

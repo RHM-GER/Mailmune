@@ -216,6 +216,72 @@ func TestLowConfidenceSpamVerdictNeverLowersScore(t *testing.T) {
 	}
 }
 
+func TestModelCannotFloorLiftTrustedBrandMail(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-ai-brand")
+	ctx := context.Background()
+
+	account.OllamaModel = "test-model"
+	account.OllamaValidated = true
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	// The model wrongly insists this genuine brand mail is spam. Small local
+	// models are known to misjudge authentic brand notifications.
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		verdict, _ := json.Marshal(map[string]any{"class": "spam", "score": 0.95, "reasonCodes": []string{"TEST"}})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": string(verdict)})
+	}))
+	t.Cleanup(fake.Close)
+	ollama, err := provider.NewOllama(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scanner.ollama = ollama
+
+	// Genuine Google notification: canonical brand domain, aligned envelope
+	// (subdomain Return-Path) and passed SPF authentication.
+	server.AddMessage("INBOX", "businessprofile-noreply@google.com", "Code zur Bestaetigung",
+		"Ihr Bestaetigungscode lautet 123456", time.Now(),
+		"Return-Path: <bounce@accounts.google.com>",
+		"Authentication-Results: mx.strato.de; spf=pass smtp.mailfrom=accounts.google.com")
+
+	if _, err := svc.StartScan(ctx, account.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("run: %s (%s)", run.Status, run.Error)
+	}
+	decisions, _ := db.ListDecisions(ctx, store.DecisionFilter{AccountID: account.ID})
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %d, want 1", len(decisions))
+	}
+	if decisions[0].Score >= 0.60 {
+		t.Fatalf("strong trust must not be floor-lifted into the review list by the model: %.3f", decisions[0].Score)
+	}
+	if decisions[0].Status != domain.StatusPending {
+		t.Fatalf("trusted brand mail must stay pending, got %s", decisions[0].Status)
+	}
+	hasAligned, hasMismatch := false, false
+	for _, item := range decisions[0].Evidence {
+		switch item.Code {
+		case "brand_aligned_domain":
+			hasAligned = true
+		case "sender_mismatch":
+			hasMismatch = true
+		}
+	}
+	if !hasAligned {
+		t.Fatalf("brand_aligned evidence missing: %+v", decisions[0].Evidence)
+	}
+	if hasMismatch {
+		t.Fatalf("aligned subdomain envelope must not trigger sender_mismatch: %+v", decisions[0].Evidence)
+	}
+}
+
 func TestResetLearningClearsOnlyAccountModel(t *testing.T) {
 	svc, db := newModelService(t, "http://127.0.0.1:1")
 	seedAccount(t, db, "acc-reset")
