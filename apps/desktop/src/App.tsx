@@ -608,7 +608,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
           <Search className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-[#888]" />
         </div>
         <div className="flex shrink-0 items-center">
-          <FilterToolbarButton active={filtersActive} open={filterOpen} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
+          <FilterToolbarButton active={filtersActive} open={filterOpen} count={filtered.length} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen((open) => !open)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:border-white/20 hover:text-white"}`}><Gauge className="size-4" />Score<span className="font-mono text-xs opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
@@ -748,9 +748,9 @@ function ToolbarButton({ children, iconOnly = false, ...props }: React.ButtonHTM
 
 function ToolbarConnector() { return <span aria-hidden className="h-px w-2 shrink-0 bg-white/10" /> }
 
-function FilterToolbarButton({ active, open, onToggle, onReset }: { active: boolean; open: boolean; onToggle: () => void; onReset: () => void }) {
+function FilterToolbarButton({ active, open, count, onToggle, onReset }: { active: boolean; open: boolean; count: number; onToggle: () => void; onReset: () => void }) {
   return <div className={`flex h-[52px] shrink-0 items-center rounded-md border transition-colors ${active ? "border-white bg-white text-[#171717]" : "border-white/10 bg-white/[0.05] text-[#a8a8a8]"}`}>
-    <button className="h-full px-3.5 text-[14px]" onClick={onToggle} aria-expanded={open}>Filter</button>
+    <button className="h-full px-3.5 text-[14px]" onClick={onToggle} aria-expanded={open}>Filter <span className="opacity-70">({count} {count === 1 ? "Mail" : "Mails"})</span></button>
     <button className={`mr-1 flex size-9 items-center justify-center rounded-md transition-colors ${active ? "hover:bg-black/10" : "hover:bg-white/[0.07] hover:text-white"}`} onClick={active ? onReset : onToggle} aria-label={active ? "Filter zurücksetzen" : "Filter öffnen"}>{active ? <RotateCcw className="size-4" /> : <ListFilter className="size-4" />}</button>
   </div>
 }
