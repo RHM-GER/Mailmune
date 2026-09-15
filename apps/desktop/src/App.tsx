@@ -271,20 +271,50 @@ export default function App() {
   )
 }
 
+// formatDuration renders a rough remaining-time estimate in German.
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  if (totalSeconds < 60) return `${totalSeconds} Sek`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes < 60) return seconds > 0 ? `${minutes} Min ${seconds} Sek` : `${minutes} Min`
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+  return restMinutes > 0 ? `${hours} Std ${restMinutes} Min` : `${hours} Std`
+}
+
 function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: number } }) {
   const finished = notice.run.status !== "running"
+  // Tick once per second while running so the remaining-time estimate counts
+  // down live instead of only updating on each progress event.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (finished) return
+    const id = window.setInterval(() => setTick((value) => value + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [finished, notice.run.id])
   const indicator = notice.run.status === "failed" || notice.run.status === "interrupted" ? "#e5484d" : notice.run.status === "cancelled" ? "#f5a524" : finished ? "#46a758" : "#39c2d7"
   const title = finished
     ? notice.run.status === "completed" ? "Prüfung abgeschlossen"
       : notice.run.status === "cancelled" ? "Prüfung abgebrochen"
       : "Prüfung fehlgeschlagen"
     : "Postfach wird geprüft …"
+  // Rough ETA: apply the average rate so far (processed / elapsed) to the
+  // remaining messages, so the user knows whether to wait minutes or hours.
+  let eta: string | null = null
+  if (!finished && notice.run.estimatedTotal > notice.run.processed && notice.run.processed > 0 && notice.run.startedAt) {
+    const elapsedMs = Date.now() - new Date(notice.run.startedAt).getTime()
+    if (elapsedMs > 0) {
+      const remaining = notice.run.estimatedTotal - notice.run.processed
+      eta = formatDuration((remaining * elapsedMs) / notice.run.processed)
+    }
+  }
   const detail = finished
     ? notice.run.status === "completed"
       ? `${notice.run.processed} Nachrichten geprüft · ${notice.candidates ?? 0} Verdachtsfälle · nichts verschoben`
       : notice.run.error || "Der Lauf wurde nicht abgeschlossen."
     : notice.run.estimatedTotal > 0
-      ? `${notice.run.processed} von etwa ${notice.run.estimatedTotal} Nachrichten gelesen`
+      ? `${notice.run.processed} von etwa ${notice.run.estimatedTotal} Nachrichten gelesen${eta ? ` · verbleibend ~${eta}` : ""}`
       : `${notice.run.processed} Nachrichten gelesen`
   return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
     <div role="status" className="flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
