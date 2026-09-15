@@ -49,6 +49,14 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
   - ⚠️ Lizenz ist **CC-BY-SA-4.0** (nicht MIT, wie vermutet): ShareAlike-Pflicht bei Übernahme/Veröffentlichung eines abgeleiteten Datensatzes plus Namensnennung; kommerzielle Nutzung erlaubt, aber Copyleft-Folgewirkungen für eine ausgelieferte Kopie der Liste müssen vor Übernahme juristisch bewertet werden
   - Alternativen Weg prüfen: Liste nur als Recherche-/Inspirationsquelle nutzen und eine eigene, kleine Liste allgemein bekannter Marken führen (Fakten wie „Marke X gehört Domain Y“ sind urheberrechtlich dünn), statt den Datensatz zu kopieren
   - Repo-Aktivität ist gering (4 Commits, 0 Stars): Aktualität und Wartung vor jeder Übernahme prüfen; nur mit dokumentierter Herkunft und Version einbauen
+- [ ] Wikidata-Exporte als Basis einer großen legitimen Markendomain-Liste evaluieren (✅ Lizenz **CC0 1.0** – kommerziell frei, keine Namensnennung, kein ShareAlike; die sauberste der verfügbaren Quellen)
+  - Vom Nutzer bereitgestellte SPARQL-Exporte (liegen lokal unter `C:\Users\User\Desktop\`, nicht im Repo):
+    - `query_World_First_5000.json` – 5.000 Unternehmen weltweit (`company`, `companyLabel`, `website`)
+    - `query_GER_First_10000.json` – 10.000 deutsche Unternehmen/Marken (`item`, `itemLabel`, `website`; Typen: Unternehmen Q783794, Business Q4830453, Marke Q431289; Land Q183; offizielle Website P856; mit deutschem Wikipedia-Artikel)
+    - Quelle/Query: https://query.wikidata.org (SPARQL im TODO-Kontext des Nutzers dokumentiert); Abrufdatum und Query bei Übernahme in die Herkunfts-Doku schreiben
+  - Geplanter Verwendungszweck: `brandTokens` von der kleinen handgepflegten Liste auf eine breite, versionierte Positivliste legitimer Markendomains ausbauen – für `brand_impersonation` (Lookalikes bekannter Marken) und `brand_aligned_domain` (echte Markenmail mit alignierter Envelope + bestandener Auth)
+  - Sicherheitsregel dabei: Listeneintrag allein ist NIEMALS ein Ham-Beweis (Absender-Header sind fälschbar); Vertrauen entsteht nur aus der Kombination Domain-in-Liste + Envelope-Alignment + SPF/DKIM-Pass, genau wie heute schon in `stageTrust`
+  - Aufbereitungsschritte vor dem Einbau: URL → registrierbare Domain (eTLD+1) normalisieren, Duplikate entfernen, veraltete/defekte P856-Einträge stichprobenartig prüfen, kompakte verarbeitete Liste (statt Roh-JSON) mit Version + Abrufdatum + Query-Herkunft erzeugen; Größe/RAM-Impact der dann ~10–15k Domains im Klassifikator messen (Trie/Map, kein Regex)
 - [ ] Blacklist-Updates ohne Telemetrie und unabhängig von App-Releases konzipieren
 - [ ] Externe Client-Bewegungen (Thunderbird/Outlook) als Feedback erkennen, ohne Schleifen
 
