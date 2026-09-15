@@ -269,6 +269,39 @@ func TestResyncRefreshesPendingDecisionScore(t *testing.T) {
 	}
 }
 
+func TestDebugModeStoresBelowThresholdMessages(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-debug-all")
+	debugScanAllMessages = true
+	t.Cleanup(func() { debugScanAllMessages = true })
+
+	// One clear candidate and one harmless message below the 60% threshold.
+	spamMessage(server, "Gewinn: Konto gesperrt, sofort handeln", time.Now())
+	server.AddMessage("INBOX", "freund@example.com", "Hallo", "Viele Gruesse bis morgen", time.Now())
+
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("run: %s (%s)", run.Status, run.Error)
+	}
+	decisions, _ := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if len(decisions) != 2 {
+		t.Fatalf("debug mode must store below-threshold messages too: got %d, want 2", len(decisions))
+	}
+	low := 0
+	for _, d := range decisions {
+		if d.Score < 0.6 {
+			low++
+		}
+	}
+	if low != 1 {
+		t.Fatalf("expected exactly one below-threshold decision, got %d", low)
+	}
+}
+
 func TestScanStartIsIdempotentWhileRunning(t *testing.T) {
 	server := imaptest.New(t, rev2Caps())
 	svc, _ := newTestService(t, server)

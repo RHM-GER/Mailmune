@@ -96,7 +96,11 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) 
 		}
 		return domain.ScanRun{}, err
 	}
-	if resync {
+	// In inspect-all test mode every scan re-reads the whole mailbox, so mails
+	// stored before the mode was enabled (or below the candidate threshold) are
+	// picked up without the user having to trigger an explicit resync.
+	// TODO(revert): drop the debugScanAllMessages clause with the test mode.
+	if resync || debugScanAllMessages {
 		if err := s.store.DeleteFolderSyncState(ctx, accountID, account.InboxFolder); err != nil {
 			return domain.ScanRun{}, err
 		}
