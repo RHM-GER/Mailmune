@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/mail"
 	"strings"
 	"time"
@@ -256,8 +257,58 @@ func readLiteralBounded(reader io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
+// cp1252Upper maps the Windows-1252-specific bytes 0x80-0x9F to Unicode. The
+// bytes 0xA0-0xFF are identical to ISO-8859-1 and need no table.
+var cp1252Upper = [32]rune{
+	0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
+	0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178,
+}
+
+// charsetReader decodes the single-byte charsets that spam tools commonly use
+// and the stdlib word decoder rejects (windows-1252 and friends). Unknown
+// charsets fail, and decodeSubject falls back to the raw text.
+func charsetReader(charset string, input io.Reader) (io.Reader, error) {
+	switch strings.ToLower(strings.TrimSpace(charset)) {
+	case "windows-1252", "cp1252", "cp-1252", "latin-1", "latin1", "iso-8859-1", "iso8859-1":
+		data, err := io.ReadAll(io.LimitReader(input, 1<<20))
+		if err != nil {
+			return nil, err
+		}
+		var builder strings.Builder
+		for _, b := range data {
+			switch {
+			case b < 0x80:
+				builder.WriteByte(b)
+			case b < 0xA0:
+				builder.WriteRune(cp1252Upper[b-0x80])
+			default:
+				builder.WriteRune(rune(b))
+			}
+		}
+		return strings.NewReader(builder.String()), nil
+	}
+	return nil, fmt.Errorf("unsupported charset %q", charset)
+}
+
+var subjectDecoder = &mime.WordDecoder{CharsetReader: charsetReader}
+
+// decodeSubject resolves RFC 2047 encoded-words ("=?windows-1252?Q?...?=")
+// that some servers leave undecoded in the envelope subject, so the rules and
+// the UI see readable text. Falls back to the raw subject on any error.
+func decodeSubject(subject string) string {
+	if !strings.Contains(subject, "=?") {
+		return subject
+	}
+	if decoded, err := subjectDecoder.DecodeHeader(subject); err == nil && strings.TrimSpace(decoded) != "" {
+		return decoded
+	}
+	return subject
+}
+
 func buildFeatures(account domain.AccountConfig, folder string, uidValidity uint32, fetched *fetchedMessage) domain.MessageFeatures {
-	features := domain.MessageFeatures{AccountID: account.ID, UIDValidity: uidValidity, UID: uint32(fetched.uid), Folder: folder, Subject: fetched.envelope.Subject, MessageID: fetched.envelope.MessageID, ReceivedAt: fetched.internalDate, OwnDomain: classifier.ExtractDomain(account.Username)}
+	features := domain.MessageFeatures{AccountID: account.ID, UIDValidity: uidValidity, UID: uint32(fetched.uid), Folder: folder, Subject: decodeSubject(fetched.envelope.Subject), MessageID: fetched.envelope.MessageID, ReceivedAt: fetched.internalDate, OwnDomain: classifier.ExtractDomain(account.Username)}
 	if len(fetched.envelope.From) > 0 {
 		features.From = fetched.envelope.From[0].Addr()
 		features.FromDomain = classifier.ExtractDomain(features.From)

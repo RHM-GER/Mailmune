@@ -400,17 +400,28 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 	classification.ModelValidated = true
 	classification.Evidence = append(classification.Evidence, domain.Evidence{Group: "model", Code: "local_model_" + verdict.Class, Weight: verdict.Score, Summary: "Lokales validiertes Modell: " + verdict.Class})
 	if verdict.Class == "spam" {
-		// The model is one independent signal group. A confident spam verdict
-		// lifts the message at least into the review list, so AI-caught spam is
-		// visible even when the rules scored it low. Decide() still needs >= 2
-		// independent groups to auto-move, so the LLM alone never moves mail.
-		blended := classification.Score*0.5 + verdict.Score*0.5
-		if verdict.Score >= 0.7 {
+		// A spam verdict may only LIFT the score, never lower it: small local
+		// models often emit poorly calibrated confidence values (even "spam"
+		// with a tiny score), and the rules' score already encodes the
+		// deterministic evidence. Decide() still needs >= 2 independent groups
+		// to auto-move, so the LLM alone never moves mail.
+		switch {
+		case verdict.Score >= 0.7:
+			// Confident verdict: at least into the review list.
+			blended := classification.Score*0.5 + verdict.Score*0.5
 			if floor := classifier.CandidateThreshold + 0.05; blended < floor {
 				blended = floor
 			}
+			if blended > classification.Score {
+				classification.Score = blended
+			}
+		case verdict.Score >= 0.5:
+			if blended := classification.Score*0.75 + verdict.Score*0.25; blended > classification.Score {
+				classification.Score = blended
+			}
 		}
-		classification.Score = blended
+		// Low-confidence spam keeps the rules' score; the evidence entry and the
+		// extra independent group still count.
 		classification.IndependentGroups++
 	}
 	return true

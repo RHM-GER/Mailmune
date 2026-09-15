@@ -19,6 +19,20 @@ func moveCaps() imap.CapSet {
 	return imap.CapSet{imap.CapIMAP4rev2: {}, imap.CapMove: {}, imap.CapIdle: {}}
 }
 
+func TestDecodeSubjectResolvesEncodedWords(t *testing.T) {
+	raw := "=?windows-1252?Q?Warum_sprechen_gerade_alle_=FCber_Mounjaslim_Diet?= =?windows-1252?Q?_Spray=3F?="
+	decoded := decodeSubject(raw)
+	if strings.Contains(decoded, "=?") {
+		t.Fatalf("subject not decoded: %q", decoded)
+	}
+	if !strings.Contains(decoded, "Mounjaslim") || !strings.Contains(decoded, "über") {
+		t.Fatalf("decoded subject lost content: %q", decoded)
+	}
+	if got := decodeSubject("Normaler Betreff"); got != "Normaler Betreff" {
+		t.Fatalf("plain subject changed: %q", got)
+	}
+}
+
 // noMoveCaps simulates an IMAP4rev1 server without the MOVE extension.
 // (IMAP4rev2 always includes MOVE, so rev1 is the only way to test refusal.)
 func noMoveCaps() imap.CapSet {
