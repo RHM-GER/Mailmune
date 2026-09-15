@@ -125,6 +125,29 @@ func TestParseVerdictDirectly(t *testing.T) {
 	}
 }
 
+func TestParseVerdictExtractsWrappedJSON(t *testing.T) {
+	cases := map[string]string{
+		"plain":           `{"class":"spam","score":0.9,"reasonCodes":["A"]}`,
+		"fenced":          "```json\n{\"class\":\"spam\",\"score\":0.9,\"reasonCodes\":[\"A\"]}\n```",
+		"preamble":        "Sure, here is the verdict:\n{\"class\":\"ham\",\"score\":0.2,\"reasonCodes\":[]}",
+		"trailing":        `{"class":"uncertain","score":0.5,"reasonCodes":[]} hope that helps`,
+		"brace in string": `{"class":"spam","score":0.8,"reasonCodes":["text with } brace"]}`,
+	}
+	for name, raw := range cases {
+		verdict, err := parseVerdict(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if verdict.Class != "spam" && verdict.Class != "ham" && verdict.Class != "uncertain" {
+			t.Fatalf("%s: bad class %q", name, verdict.Class)
+		}
+	}
+	// Genuinely broken output is still rejected.
+	if _, err := parseVerdict("the model refused to answer"); err == nil {
+		t.Fatal("non-JSON output must be rejected")
+	}
+}
+
 func TestCapabilityRunAgainstLocalModel(t *testing.T) {
 	requests := 0
 	provider := fakeOllama(t, func() (int, string) {

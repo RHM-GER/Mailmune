@@ -177,7 +177,10 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 				"reasonCodes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
 			}, "additionalProperties": false,
 		},
-		"options": map[string]any{"temperature": 0, "num_predict": 180},
+		// num_predict is a cap, not a target: a conforming verdict stops far
+		// below it. The headroom keeps models that emit a short preamble or
+		// reasoning from being truncated before the JSON is complete.
+		"options": map[string]any{"temperature": 0, "num_predict": 512},
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -194,7 +197,10 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return ModelVerdict{}, fmt.Errorf("ollama returned %s", resp.Status)
+		// Include Ollama's own message so a wrong/missing model tag or an
+		// unsupported structured-output request is diagnosable in the UI.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return ModelVerdict{}, fmt.Errorf("ollama returned %s: %s", resp.Status, strings.TrimSpace(string(detail)))
 	}
 	var outer ollamaResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&outer); err != nil {
@@ -204,11 +210,13 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 }
 
 // parseVerdict validates the raw model output. Free text, unknown fields and
-// out-of-range values are rejected; nothing here trusts the model.
+// out-of-range values are rejected; nothing here trusts the model. Models
+// sometimes wrap the answer in markdown fences or add a short preamble despite
+// the schema, so the first balanced JSON object is extracted before decoding.
 func parseVerdict(raw string) (ModelVerdict, error) {
 	var verdict ModelVerdict
-	if err := json.Unmarshal([]byte(raw), &verdict); err != nil {
-		return ModelVerdict{}, fmt.Errorf("invalid model JSON: %w", err)
+	if err := json.Unmarshal([]byte(extractJSONObject(raw)), &verdict); err != nil {
+		return ModelVerdict{}, fmt.Errorf("invalid model JSON: %w (raw: %.160q)", err, strings.TrimSpace(raw))
 	}
 	if verdict.Score < 0 || verdict.Score > 1 || (verdict.Class != "spam" && verdict.Class != "ham" && verdict.Class != "uncertain") {
 		return ModelVerdict{}, errors.New("model response violates verdict contract")
@@ -217,6 +225,48 @@ func parseVerdict(raw string) (ModelVerdict, error) {
 		return ModelVerdict{}, errors.New("model response violates verdict contract")
 	}
 	return verdict, nil
+}
+
+// extractJSONObject returns the first balanced {...} block of raw, skipping any
+// markdown fences, leading preamble or trailing text a model may add despite
+// the schema. Strings and escapes are tracked so braces inside string values
+// do not confuse the scan. When no object is found the trimmed input is
+// returned, so decoding fails with a clear error instead of panicking.
+func extractJSONObject(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	start := strings.Index(trimmed, "{")
+	if start < 0 {
+		return trimmed
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(trimmed); i++ {
+		c := trimmed[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return trimmed[start : i+1]
+			}
+		}
+	}
+	return trimmed[start:]
 }
 
 // CapabilityCase is one fixed probe of the model capability test. Inputs are
