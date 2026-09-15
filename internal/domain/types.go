@@ -74,6 +74,10 @@ type MessageFeatures struct {
 	// (e.g. sextortion that forges the victim's own address).
 	OwnDomain            string               `json:"ownDomain"`
 	ReplyTo              string               `json:"replyTo"`
+	// ReturnPath is the envelope sender (Return-Path header / SMTP MAIL FROM).
+	// Unlike the free-text From header it is set by the delivering MTA, so a
+	// domain mismatch between the two is a spoofing hint.
+	ReturnPath           string               `json:"returnPath"`
 	Subject              string               `json:"subject"`
 	Text                 string               `json:"-"`
 	ReceivedAt           time.Time            `json:"receivedAt"`

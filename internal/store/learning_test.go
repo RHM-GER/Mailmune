@@ -102,17 +102,17 @@ func TestRefreshPendingDecisionUpdatesOnlyPending(t *testing.T) {
 	}
 
 	evidence := []domain.Evidence{{Group: "model", Code: "local_model_spam", Weight: 0.9, Summary: "x"}}
-	updated, err := store.RefreshPendingDecision(ctx, "p1", 0.93, evidence, "llama3")
+	updated, err := store.RefreshPendingDecision(ctx, "p1", 0.93, evidence, "llama3", "Neuer Betreff")
 	if err != nil || !updated {
 		t.Fatalf("pending refresh: updated=%v err=%v", updated, err)
 	}
 	got, _ := store.DecisionsByIDs(ctx, []string{"p1"})
-	if len(got) != 1 || got[0].Score != 0.93 || got[0].ModelVersion != "llama3" {
+	if len(got) != 1 || got[0].Score != 0.93 || got[0].ModelVersion != "llama3" || got[0].Subject != "Neuer Betreff" {
 		t.Fatalf("pending decision not refreshed: %+v", got)
 	}
 
 	// A confirmed decision is ground truth and must never change.
-	updated, err = store.RefreshPendingDecision(ctx, "c1", 0.99, evidence, "llama3")
+	updated, err = store.RefreshPendingDecision(ctx, "c1", 0.99, evidence, "llama3", "egal")
 	if err != nil || updated {
 		t.Fatalf("confirmed refresh must be a no-op: updated=%v err=%v", updated, err)
 	}

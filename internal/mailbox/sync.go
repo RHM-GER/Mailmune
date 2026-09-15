@@ -25,7 +25,7 @@ const (
 	maxMimeParts       = 256
 
 	// Selected headers that are safe metadata and useful for classification.
-	scanHeaderFields = "List-Unsubscribe,List-Id,Auto-Submitted,Reply-To,Message-ID,Authentication-Results,Precedence"
+	scanHeaderFields = "List-Unsubscribe,List-Id,Auto-Submitted,Reply-To,Message-ID,Authentication-Results,Precedence,Return-Path"
 )
 
 // SyncOptions bounds a single folder synchronization run.
@@ -319,6 +319,7 @@ func buildFeatures(account domain.AccountConfig, folder string, uidValidity uint
 	if len(fetched.headerBytes) > 0 {
 		if parsed, err := mail.ReadMessage(strings.NewReader(string(fetched.headerBytes) + "\r\n")); err == nil {
 			features.ListUnsubscribe = parsed.Header.Get("List-Unsubscribe") != ""
+			features.ReturnPath = parsed.Header.Get("Return-Path")
 			if auth := parsed.Header.Get("Authentication-Results"); auth != "" {
 				// Authentication-Results is untrusted input; treat it only as
 				// a weak hint, never as proof.

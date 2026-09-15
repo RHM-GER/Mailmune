@@ -235,6 +235,42 @@ func TestGenericSpamSignalsServerMarkerBlackmailSpoofing(t *testing.T) {
 	}
 }
 
+func TestBrandImpersonationAndReturnPathMismatch(t *testing.T) {
+	rules := NewRules()
+
+	// A paypal look-alike domain is flagged and reaches the review threshold;
+	// the brand's own domain is not.
+	fake := rules.Classify(domain.MessageFeatures{From: "rechnung@rfcrecouvpaypal.com", FromDomain: "rfcrecouvpaypal.com", Subject: "Hinweis auf unbezahlten Betrag!"}, domain.MailboxProfile{})
+	if findEvidence(fake.Evidence, CodeBrandImpersonation) == nil {
+		t.Fatalf("brand impersonation missing: %+v", fake.Evidence)
+	}
+	if findEvidence(fake.Evidence, CodeFinancialPressure) == nil {
+		t.Fatalf("unbezahlter Betrag must trigger financial pressure: %+v", fake.Evidence)
+	}
+	if fake.Score < CandidateThreshold {
+		t.Fatalf("fake paypal invoice should reach the review threshold: %.2f", fake.Score)
+	}
+	real := rules.Classify(domain.MessageFeatures{From: "service@paypal.com", FromDomain: "paypal.com", Subject: "Ihre Zahlung"}, domain.MailboxProfile{})
+	if findEvidence(real.Evidence, CodeBrandImpersonation) != nil {
+		t.Fatalf("the brand's own domain must not be flagged: %+v", real.Evidence)
+	}
+
+	// Envelope/From mismatch is a spoofing hint; mailing lists are exempt.
+	mismatch := rules.Classify(domain.MessageFeatures{From: "chef@firma.example", FromDomain: "firma.example", ReturnPath: "bounce@bulkmail.example", Subject: "Termin"}, domain.MailboxProfile{})
+	if findEvidence(mismatch.Evidence, CodeSenderMismatch) == nil {
+		t.Fatalf("return-path mismatch missing: %+v", mismatch.Evidence)
+	}
+	list := rules.Classify(domain.MessageFeatures{From: "news@shop.example", FromDomain: "shop.example", ReturnPath: "bounce@mailer.example", ListUnsubscribe: true, Subject: "Angebote"}, domain.MailboxProfile{})
+	if findEvidence(list.Evidence, CodeSenderMismatch) != nil {
+		t.Fatalf("mailing list must not be flagged for envelope mismatch: %+v", list.Evidence)
+	}
+
+	// Trailing junk must not defeat domain extraction (dash spoofing).
+	if got := ExtractDomain("info@eigene-domain.de-"); got != "eigene-domain.de" {
+		t.Fatalf("ExtractDomain did not normalize trailing junk: %q", got)
+	}
+}
+
 func withSubject(msg domain.MessageFeatures, subject string) domain.MessageFeatures {
 	msg.Subject = subject
 	return msg

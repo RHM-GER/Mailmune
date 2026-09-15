@@ -29,6 +29,8 @@ const (
 	CodeServerMarkedSpam     = "server_marked_spam"
 	CodeBlackmail            = "blackmail_threat"
 	CodeSpoofedSender        = "spoofed_sender"
+	CodeSenderMismatch       = "sender_mismatch"
+	CodeBrandImpersonation   = "brand_impersonation"
 	CodeSuspiciousLinks      = "suspicious_links"
 	CodeURLShortener         = "url_shortener"
 	CodeListUnsubscribe      = "list_unsubscribe"
@@ -48,7 +50,7 @@ var (
 	// Requests to confirm identity or credentials.
 	verifyTerms = regexp.MustCompile(`(?i)(bestätigen sie|bitte bestätigen|identität bestätigen|identität verifizieren|verifizieren sie|konto aktualisieren|daten aktualisieren|angaben aktualisieren|passwort bestätigen|klicken sie (hier|unten)|jetzt anmelden und|confirm (your|now)|verify (your|now)|update (your|now))`)
 	// Financial pressure patterns.
-	financialTerms = regexp.MustCompile(`(?i)(steht noch aus|ausstehende zahlung|bitte.{0,20}begleichen|offene (rechnung|forderung)|mahnung|inkasso|zahlungserinnerung|überprüfen sie ihr konto|kontoaktualisierung erforderlich)`)
+	financialTerms = regexp.MustCompile(`(?i)(steht noch aus|ausstehende zahlung|bitte.{0,20}begleichen|offene (rechnung|forderung)|unbezahlt|unbeglichen|offener betrag|mahnung|inkasso|zahlungserinnerung|überprüfen sie ihr konto|kontoaktualisierung erforderlich)`)
 	trackingURL    = regexp.MustCompile(`(?i)(bit\.ly|tinyurl\.com|t\.co|cutt\.ly|rb\.gy)/`)
 	digitRun       = regexp.MustCompile(`[0-9]{4,}`)
 	digitAnywhere  = regexp.MustCompile(`[0-9]`)
@@ -183,6 +185,61 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 	if own := strings.ToLower(strings.TrimSpace(msg.OwnDomain)); own != "" && senderDomain == own && !msg.KnownCorrespondent {
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSpoofedSender, Weight: 0.45, Summary: "Absender gibt die eigene Domain an – bei eingehender Mail wahrscheinlich gefälscht (Spoofing)"})
 	}
+	// Envelope sender (Return-Path) versus From: the envelope is set by the
+	// delivering MTA while From is free text a spammer chooses arbitrarily. A
+	// domain mismatch outside of mailing lists is a classic spoofing hint.
+	if returnDomain := ExtractDomain(msg.ReturnPath); returnDomain != "" && returnDomain != senderDomain && !msg.ListUnsubscribe {
+		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSenderMismatch, Weight: 0.35, Summary: "Return-Path weicht vom From-Absender ab (Envelope-/Header-Mismatch)"})
+	}
+	// Brand impersonation: the domain carries a commonly forged trademark but
+	// is not the brand's own domain (e.g. rfcrecouvpaypal.com).
+	if brand, ok := impersonatedBrand(senderDomain); ok {
+		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeBrandImpersonation, Weight: 0.5, Summary: "Absenderdomain imitiert eine bekannte Marke (" + brand + ")"})
+	}
+}
+
+// brandTokens lists commonly impersonated trademarks with their legitimate
+// domains. A sender domain that contains a token without being one of the
+// brand's own domains is treated as impersonation. This is a small,
+// transparent, built-in list of famous marks for a heuristic - not an external
+// blacklist of bad domains; it only adds evidence and never blocks or deletes.
+var brandTokens = []struct {
+	token string
+	own   []string
+}{
+	{"paypal", []string{"paypal.com", "paypal.de"}},
+	{"amazon", []string{"amazon.de", "amazon.com", "amazonaws.com"}},
+	{"adac", []string{"adac.de"}},
+	{"telekom", []string{"telekom.de", "t-online.de"}},
+	{"google", []string{"google.com", "google.de", "googlemail.com"}},
+	{"microsoft", []string{"microsoft.com", "live.com", "outlook.com"}},
+	{"apple", []string{"apple.com", "icloud.com"}},
+	{"netflix", []string{"netflix.com"}},
+	{"klarna", []string{"klarna.com", "klarna.de"}},
+	{"vodafone", []string{"vodafone.de", "vodafone.com"}},
+	{"sparkasse", []string{"sparkasse.de"}},
+	{"dhl", []string{"dhl.de", "dhl.com"}},
+	{"strato", []string{"strato.de", "strato.com"}},
+	{"lidl", []string{"lidl.de", "lidl.com"}},
+}
+
+func impersonatedBrand(senderDomain string) (string, bool) {
+	for _, brand := range brandTokens {
+		if !strings.Contains(senderDomain, brand.token) {
+			continue
+		}
+		legitimate := false
+		for _, own := range brand.own {
+			if senderDomain == own || strings.HasSuffix(senderDomain, "."+own) {
+				legitimate = true
+				break
+			}
+		}
+		if !legitimate {
+			return brand.token, true
+		}
+	}
+	return "", false
 }
 
 // machineGeneratedLabel reports whether a domain label looks concatenated or
@@ -321,7 +378,9 @@ func ExtractDomain(address string) string {
 	if len(parts) != 2 {
 		return ""
 	}
-	return strings.TrimSuffix(parts[1], ".")
+	// Strip trailing junk (dots, dashes) that spammers append to imitate a
+	// legitimate domain while evading exact matches.
+	return strings.TrimRight(parts[1], ".-")
 }
 
 // CountURLs counts URL occurrences in bounded text offline. It never

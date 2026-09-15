@@ -142,19 +142,19 @@ func (s *SQLite) UpdateDecisionFolder(ctx context.Context, decisionID, currentFo
 }
 
 // RefreshPendingDecision updates the mutable classification of a still-pending
-// decision after a resync: score, evidence and model version reflect the
-// current rules, learning model and any validated local LLM verdict. Decisions
-// that were reviewed, deferred or moved are ground truth and are never
-// touched, so human feedback and completed moves stay stable. It reports
-// whether a pending row was updated.
-func (s *SQLite) RefreshPendingDecision(ctx context.Context, decisionID string, score float64, evidence []domain.Evidence, modelVersion string) (bool, error) {
+// decision after a resync: score, evidence, model version and subject (which
+// may now be MIME-decoded) reflect the current rules, learning model and any
+// validated local LLM verdict. Decisions that were reviewed, deferred or moved
+// are ground truth and are never touched, so human feedback and completed
+// moves stay stable. It reports whether a pending row was updated.
+func (s *SQLite) RefreshPendingDecision(ctx context.Context, decisionID string, score float64, evidence []domain.Evidence, modelVersion, subject string) (bool, error) {
 	payload, err := json.Marshal(evidence)
 	if err != nil {
 		return false, err
 	}
 	result, err := s.db.ExecContext(ctx,
-		"UPDATE decisions SET score=?,evidence_json=?,model_version=? WHERE id=? AND status=?",
-		score, string(payload), modelVersion, decisionID, string(domain.StatusPending))
+		"UPDATE decisions SET score=?,evidence_json=?,model_version=?,subject=? WHERE id=? AND status=?",
+		score, string(payload), modelVersion, subject, decisionID, string(domain.StatusPending))
 	if err != nil {
 		return false, err
 	}

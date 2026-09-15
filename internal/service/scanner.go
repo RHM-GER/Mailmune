@@ -96,11 +96,7 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) 
 		}
 		return domain.ScanRun{}, err
 	}
-	// In inspect-all test mode every scan re-reads the whole mailbox, so mails
-	// stored before the mode was enabled (or below the candidate threshold) are
-	// picked up without the user having to trigger an explicit resync.
-	// TODO(revert): drop the debugScanAllMessages clause with the test mode.
-	if resync || debugScanAllMessages {
+	if resync {
 		if err := s.store.DeleteFolderSyncState(ctx, accountID, account.InboxFolder); err != nil {
 			return domain.ScanRun{}, err
 		}
@@ -228,6 +224,10 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		s.finish(run.ID, domain.ScanFailed, redactError(err))
 		return result
 	}
+	// A full re-read (explicit resync or the very first scan of a folder)
+	// reviews EVERY message with the model; incremental runs only consult it
+	// for the ambiguous band so live detection of new mail stays fast.
+	aiAll = aiAll || (prev.UIDValidity == 0 && prev.LastUID == 0)
 
 	progressCounter := 0
 	opts := mailbox.SyncOptions{
@@ -328,7 +328,7 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			// set, learning model or validated local LLM verdict is reflected
 			// instead of being discarded by the dedup. Reviewed and moved
 			// decisions are ground truth and stay frozen.
-			if _, err := s.store.RefreshPendingDecision(context.Background(), storedID, classification.Score, classification.Evidence, classification.ModelUsed); err != nil {
+			if _, err := s.store.RefreshPendingDecision(context.Background(), storedID, classification.Score, classification.Evidence, classification.ModelUsed, decision.Subject); err != nil {
 				return err
 			}
 		}

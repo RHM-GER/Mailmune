@@ -28,6 +28,8 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `sender_integrity` | `sender_digit_pattern` | Spam | Absenderdomain mit langen Ziffernfolgen (≥ 4) – maschinell erzeugt |
 | `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
 | `sender_integrity` | `spoofed_sender` | Spam | Eingehende Mail gibt die eigene Kontodomain als Absender an – sehr wahrscheinlich gefälscht (Spoofing, z. B. Sextortion) |
+| `sender_integrity` | `sender_mismatch` | Spam | Return-Path (Envelope) weicht vom From-Header ab – Spoofing-Hinweis (Mailinglisten ausgenommen) |
+| `sender_integrity` | `brand_impersonation` | Spam | Absenderdomain enthält eine bekannte Marke (PayPal, ADAC, Telekom …), ohne deren eigene Domain zu sein |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |
