@@ -791,11 +791,37 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
     return () => window.clearTimeout(timeout)
   }, [visible, mounted])
   if (!mounted) return null
-  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30 flex h-[52px] items-center rounded-md border border-white/10 bg-[#232323] p-1.5 shadow-[0_30px_60px_rgba(0,0,0,.45)]`}><button disabled={disabled} className="flex h-full items-center gap-2 rounded-l bg-white px-4 text-sm text-[#171717] disabled:cursor-not-allowed disabled:opacity-40" onClick={onPrimary}>{primary}<Check className="size-4" /></button><button className="flex h-full items-center gap-2 rounded-r bg-[#171717] px-4 text-sm text-[#a8a8a8]" onClick={onCancel}>Abbrechen<X className="size-4" /></button></div>
+  // Die weiße Pille gleitet beim Hover zwischen Speichern und Abbrechen; die
+  // Ein-/Ausfahr-Animation bleibt auf dem Container.
+  return <SegmentedControl
+    className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30 shadow-[0_30px_60px_rgba(0,0,0,.45)]`}
+    ariaLabel={primary}
+    options={[{ value: "primary", label: primary, icon: Check, disabled }, { value: "cancel", label: "Abbrechen", icon: X }]}
+    value="primary"
+    onChange={(next) => { if (next === "cancel") onCancel(); else if (!disabled) onPrimary() }}
+  />
+}
+
+// Segmentiertes Steuerelement mit gleitender weißer Pille: Der Indikator folgt
+// der hovered Option per transform-Transition (GPU-freundlich statt `left`)
+// und gleitet beim Klicken oder Verlassen an die aktive Position zurück.
+type SegmentOption<T extends string> = { value: T; label: string; icon?: typeof Bell; disabled?: boolean }
+
+function SegmentedControl<T extends string>({ options, value, onChange, size = "lg", className = "", ariaLabel }: { options: SegmentOption<T>[]; value: T; onChange: (value: T) => void; size?: "lg" | "sm"; className?: string; ariaLabel?: string }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const activeIndex = Math.max(0, options.findIndex((option) => option.value === value))
+  const pillIndex = hoverIndex ?? activeIndex
+  const pad = size === "sm" ? 4 : 6
+  return <div role="group" aria-label={ariaLabel} onMouseLeave={() => setHoverIndex(null)} className={`relative flex items-center rounded-md border border-white/10 bg-[#232323] ${size === "sm" ? "h-8 p-1" : "h-[52px] p-1.5"} ${className}`}>
+    <span aria-hidden className={`pointer-events-none absolute bg-white transition-transform duration-200 ease-out motion-reduce:transition-none ${size === "sm" ? "rounded-sm" : "rounded"}`} style={{ top: pad, bottom: pad, left: pad, width: `calc((100% - ${pad * 2}px) / ${options.length})`, transform: `translateX(${pillIndex * 100}%)` }} />
+    <div className="relative grid h-full flex-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((option, index) => <button key={option.value} type="button" disabled={option.disabled} aria-pressed={option.value === value} onClick={() => onChange(option.value)} onMouseEnter={() => setHoverIndex(index)} onFocus={() => setHoverIndex(index)} className={`relative z-10 flex h-full items-center justify-center gap-2 whitespace-nowrap transition-colors duration-200 motion-reduce:transition-none ${size === "sm" ? "px-2 text-[10px] font-medium" : "px-3.5 text-sm"} ${pillIndex === index ? "text-[#171717]" : "text-[#a8a8a8]"} disabled:cursor-not-allowed disabled:opacity-40`}>{option.label}{option.icon && <option.icon className={size === "sm" ? "size-3" : "size-4"} />}</button>)}
+    </div>
+  </div>
 }
 
 function ViewSwitch({ value, onChange }: { value: "review" | "spam"; onChange: (value: "review" | "spam") => void }) {
-  return <div className="flex h-[52px] items-center rounded-md border border-white/10 bg-[#232323] p-1.5"><button onClick={() => onChange("review")} className={`flex h-full items-center gap-2 rounded-l px-3.5 text-sm ${value === "review" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Review<Eye className="size-4" /></button><button onClick={() => onChange("spam")} className={`flex h-full items-center gap-2 rounded-r px-3.5 text-sm ${value === "spam" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Spam<Trash2 className="size-4" /></button></div>
+  return <SegmentedControl ariaLabel="Ansicht wechseln" options={[{ value: "review", label: "Review", icon: Eye }, { value: "spam", label: "Spam", icon: Trash2 }]} value={value} onChange={onChange} />
 }
 
 function ToolbarButton({ children, iconOnly = false, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { iconOnly?: boolean }) {
@@ -832,7 +858,7 @@ function Notifications({ scrollRef, items = notifications, onReview }: { scrollR
   const visible = items.filter((item) => view === "archived" ? Boolean(archived[item.id]) : !archived[item.id])
   const notificationSections = visible.map((item) => ({ id: `notification-${item.id}`, label: item.title }))
   return <div className="relative">
-    <div className="flex items-start justify-between gap-6"><h1 className="pt-1 text-2xl font-medium tracking-tight">Benachrichtigungen</h1><div className="flex h-[52px] items-center rounded-md border border-white/10 bg-[#232323] p-1.5"><button onClick={() => setView("open")} className={`flex h-full items-center gap-2 rounded-l px-3.5 text-sm ${view === "open" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Offen<Bell className="size-4" /></button><button onClick={() => setView("archived")} className={`flex h-full items-center gap-2 rounded-r px-3.5 text-sm ${view === "archived" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Archiviert<Archive className="size-4" /></button></div></div>
+    <div className="flex items-start justify-between gap-6"><h1 className="pt-1 text-2xl font-medium tracking-tight">Benachrichtigungen</h1><SegmentedControl ariaLabel="Benachrichtigungsansicht" options={[{ value: "open", label: "Offen", icon: Bell }, { value: "archived", label: "Archiviert", icon: Archive }]} value={view} onChange={setView} /></div>
     <div className="mt-12 max-w-4xl">
     <div className="border-y border-white/[0.09]">{visible.map((item) => <div key={item.id} data-section-id={`notification-${item.id}`} className="flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0"><div className="relative flex size-9 shrink-0 items-center justify-center text-[#999]"><Bell className="size-4" />{item.action && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[#ff6b2c]" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>{item.action && view === "open" && <Button size="sm" variant="outline" onClick={onReview}>Prüfen</Button>}<button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => setArchived((current) => { const next = { ...current }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; return next })}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button></div>)}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
     {view === "archived" && <p className="mt-3 text-right text-[11px] text-[#555]">Archivierte Einträge werden nach 180 Tagen entfernt.</p>}
@@ -1071,7 +1097,7 @@ function ConnectionCard({ icon: Icon, title, detail, enabled, onEnabled, onSetti
 }
 
 function CompactOnOff({ enabled, onChange, label }: { enabled: boolean; onChange: (enabled: boolean) => void; label: string }) {
-  return <div className="ml-2 flex h-8 items-center rounded-md border border-white/10 bg-[#171717] p-1" role="group" aria-label={`${label} ein- oder ausschalten`}><button className={`h-full rounded-sm px-2 text-[10px] font-medium transition-colors ${enabled ? "bg-white text-[#171717]" : "text-[#666] hover:text-white"}`} onClick={() => onChange(true)} aria-pressed={enabled}>An</button><button className={`h-full rounded-sm px-2 text-[10px] font-medium transition-colors ${!enabled ? "bg-white text-[#171717]" : "text-[#666] hover:text-white"}`} onClick={() => onChange(false)} aria-pressed={!enabled}>Aus</button></div>
+  return <SegmentedControl size="sm" className="ml-2 bg-[#171717]" ariaLabel={`${label} ein- oder ausschalten`} options={[{ value: "on", label: "An" }, { value: "off", label: "Aus" }]} value={enabled ? "on" : "off"} onChange={(next) => onChange(next === "on")} />
 }
 
 function EmptyConnectionCard({ text }: { text: string }) {
