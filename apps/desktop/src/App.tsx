@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
@@ -795,6 +795,7 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
   // Ein-/Ausfahr-Animation bleibt auf dem Container.
   return <SegmentedControl
     className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30 shadow-[0_30px_60px_rgba(0,0,0,.45)]`}
+    buttonClassName="px-4 text-sm"
     ariaLabel={primary}
     options={[{ value: "primary", label: primary, icon: Check, disabled }, { value: "cancel", label: "Abbrechen", icon: X }]}
     value="primary"
@@ -803,20 +804,32 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
 }
 
 // Segmentiertes Steuerelement mit gleitender weißer Pille: Der Indikator folgt
-// der hovered Option per transform-Transition (GPU-freundlich statt `left`)
-// und gleitet beim Klicken oder Verlassen an die aktive Position zurück.
+// der hovered Option und gleitet beim Klicken oder Verlassen an die aktive
+// Position zurück. Die Buttons behalten ihre natürliche Inhaltsbreite und der
+// dunkle Track (#171717) hinter ihnen bleibt wie vorher erhalten.
 type SegmentOption<T extends string> = { value: T; label: string; icon?: typeof Bell; disabled?: boolean }
 
-function SegmentedControl<T extends string>({ options, value, onChange, size = "lg", className = "", ariaLabel }: { options: SegmentOption<T>[]; value: T; onChange: (value: T) => void; size?: "lg" | "sm"; className?: string; ariaLabel?: string }) {
+function SegmentedControl<T extends string>({ options, value, onChange, size = "lg", className = "", buttonClassName, ariaLabel }: { options: SegmentOption<T>[]; value: T; onChange: (value: T) => void; size?: "lg" | "sm"; className?: string; buttonClassName?: string; ariaLabel?: string }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const activeIndex = Math.max(0, options.findIndex((option) => option.value === value))
   const pillIndex = hoverIndex ?? activeIndex
   const pad = size === "sm" ? 4 : 6
+  // Pille per Messung positionieren: gleiche Position/Größe wie der jeweilige
+  // Button (natürliche Breite), animiert über left/width mit Transition.
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const [pill, setPill] = useState<{ left: number; width: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = buttonRefs.current[pillIndex]
+    if (!el) return
+    const left = el.offsetLeft
+    const width = el.offsetWidth
+    setPill((prev) => (prev && prev.left === left && prev.width === width ? prev : { left, width }))
+  })
   return <div role="group" aria-label={ariaLabel} onMouseLeave={() => setHoverIndex(null)} className={`relative flex items-center rounded-md border border-white/10 bg-[#232323] ${size === "sm" ? "h-8 p-1" : "h-[52px] p-1.5"} ${className}`}>
-    <span aria-hidden className={`pointer-events-none absolute bg-white transition-transform duration-200 ease-out motion-reduce:transition-none ${size === "sm" ? "rounded-sm" : "rounded"}`} style={{ top: pad, bottom: pad, left: pad, width: `calc((100% - ${pad * 2}px) / ${options.length})`, transform: `translateX(${pillIndex * 100}%)` }} />
-    <div className="relative grid h-full flex-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
-      {options.map((option, index) => <button key={option.value} type="button" disabled={option.disabled} aria-pressed={option.value === value} onClick={() => onChange(option.value)} onMouseEnter={() => setHoverIndex(index)} onFocus={() => setHoverIndex(index)} className={`relative z-10 flex h-full items-center justify-center gap-2 whitespace-nowrap transition-colors duration-200 motion-reduce:transition-none ${size === "sm" ? "px-2 text-[10px] font-medium" : "px-3.5 text-sm"} ${pillIndex === index ? "text-[#171717]" : "text-[#a8a8a8]"} disabled:cursor-not-allowed disabled:opacity-40`}>{option.label}{option.icon && <option.icon className={size === "sm" ? "size-3" : "size-4"} />}</button>)}
-    </div>
+    {/* Dunkler Track hinter den Buttons – wie vorher Teil des Designs. */}
+    <span aria-hidden className="pointer-events-none absolute bg-[#171717]" style={{ top: pad, bottom: pad, left: pad, right: pad, borderRadius: size === "sm" ? 2 : 4 }} />
+    {pill && <span aria-hidden className={`pointer-events-none absolute bg-white transition-all duration-200 ease-out motion-reduce:transition-none ${size === "sm" ? "rounded-sm" : "rounded"}`} style={{ top: pad, bottom: pad, left: pill.left, width: pill.width }} />}
+    {options.map((option, index) => <button key={option.value} ref={(el) => { buttonRefs.current[index] = el }} type="button" disabled={option.disabled} aria-pressed={option.value === value} onClick={() => onChange(option.value)} onMouseEnter={() => setHoverIndex(index)} onFocus={() => setHoverIndex(index)} className={`relative z-10 flex h-full items-center gap-2 whitespace-nowrap transition-colors duration-200 motion-reduce:transition-none ${size === "sm" ? "rounded-sm px-2 text-[10px] font-medium" : buttonClassName ?? "px-3.5 text-sm"} ${pillIndex === index ? "text-[#171717]" : size === "sm" ? "text-[#666]" : "text-[#a8a8a8]"} disabled:cursor-not-allowed disabled:opacity-40`}>{option.label}{option.icon && <option.icon className={size === "sm" ? "size-3" : "size-4"} />}</button>)}
   </div>
 }
 
