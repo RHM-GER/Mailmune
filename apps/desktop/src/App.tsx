@@ -505,14 +505,34 @@ function DateRangeDialog({ open, onOpenChange, initial, onApply }: { open: boole
 // ScoreRangeFilter is a compact Von/Bis slider pair (0-100 %) that narrows the
 // review table by decision score. Two native range inputs keep it dependency-
 // free; min never exceeds max and vice versa.
-function ScoreRangeFilter({ min, max, onChange }: { min: number; max: number; onChange: (min: number, max: number) => void }) {
+// DualRangeSlider is a two-thumb 0-100% range slider styled like the settings
+// sliders (dark track, striped background, a filled selected range and a thumb
+// on each side). Custom pointer handling keeps it dependency-free and avoids
+// the native orange range input.
+function DualRangeSlider({ min, max, onChange }: { min: number; max: number; onChange: (min: number, max: number) => void }) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<"min" | "max" | null>(null)
+  useEffect(() => {
+    if (!dragging) return
+    const move = (event: PointerEvent) => {
+      const rect = trackRef.current?.getBoundingClientRect()
+      if (!rect || rect.width === 0) return
+      const value = Math.round(Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)))
+      if (dragging === "min") onChange(Math.min(value, max), max)
+      else onChange(min, Math.max(value, min))
+    }
+    const stop = () => setDragging(null)
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", stop)
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop) }
+  }, [dragging, min, max, onChange])
+  const thumb = "absolute top-1/2 z-10 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#4d4d4d] ring-1 ring-white/25 transition-colors hover:bg-[#5c5c5c]"
   return (
-    <div className="flex h-[52px] shrink-0 items-center gap-2.5 rounded-md border border-white/10 bg-white/[0.05] px-3.5">
-      <Gauge className="size-4 shrink-0 text-[#888]" />
-      <span className="shrink-0 text-xs text-[#888]">Score</span>
-      <input type="range" min={0} max={100} step={1} value={min} aria-label="Score von" onChange={(event) => onChange(Math.min(Number(event.target.value), max), max)} className="w-20 accent-[#ff6b2c]" />
-      <input type="range" min={0} max={100} step={1} value={max} aria-label="Score bis" onChange={(event) => onChange(min, Math.max(Number(event.target.value), min))} className="w-20 accent-[#ff6b2c]" />
-      <span className="shrink-0 font-mono text-xs text-[#ccc]">{min}–{max}%</span>
+    <div ref={trackRef} className="relative h-12 w-full select-none rounded-[10px] border border-white/10 bg-[#242424]">
+      <div className="pointer-events-none absolute inset-y-3 left-4 right-4 opacity-70" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,.055) 0 4px, transparent 4px 14px)" }} />
+      <div className="pointer-events-none absolute inset-y-1 rounded-lg bg-[#171717]" style={{ left: `${min}%`, width: `${Math.max(max - min, 0)}%` }} />
+      <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `${min}%` }} />
+      <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `${max}%` }} />
     </div>
   )
 }
@@ -538,6 +558,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
   const [scoreRange, setScoreRange] = useState<{ min: number; max: number }>(() => {
     try { const raw = localStorage.getItem("mailmune.reviewScoreRange"); return raw ? (JSON.parse(raw) as { min: number; max: number }) : { min: 0, max: 100 } } catch { return { min: 0, max: 100 } }
   })
+  const [scoreOpen, setScoreOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
@@ -590,11 +611,12 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
           <FilterToolbarButton active={filtersActive} open={filterOpen} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
-          {filterOpen && <><ToolbarConnector /><ScoreRangeFilter min={scoreRange.min} max={scoreRange.max} onChange={(min, max) => { setSelected([]); setScoreRange({ min, max }) }} /></>}
+          {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen((open) => !open)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:border-white/20 hover:text-white"}`}><Gauge className="size-4" />Score<span className="font-mono text-xs opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
           {range === "custom" && <button onClick={() => setCustomOpen(true)} className="ml-2 flex h-[52px] shrink-0 items-center gap-2 rounded-md border border-white! bg-white! px-3.5 text-sm text-[#171717]! transition-colors hover:bg-white/90"><CalendarDays className="size-4" />{customRange ? `${formatShortDate(customRange.from)} – ${formatShortDate(customRange.to)}` : "Zeitraum wählen"}</button>}
           <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next && !customRange && range === "custom") setRange("all") }} initial={customRange} onApply={(picked) => { setCustomRange(picked); setRange("custom"); setSelected([]) }} />
         </div>
       </div><ScrollFade strength={toolbarFade} direction="horizontal" compact targetRef={toolbarScrollRef} /></div>
+      {scoreOpen && <div className="mt-3 flex items-center gap-4 rounded-[10px] border border-white/10 bg-[#1b1b1b] px-4 py-3"><span className="shrink-0 text-xs text-[#888]">Score von/bis</span><div className="max-w-md flex-1"><DualRangeSlider min={scoreRange.min} max={scoreRange.max} onChange={(min, max) => { setSelected([]); setScoreRange({ min, max }) }} /></div><span className="shrink-0 font-mono text-xs text-[#ccc]">{scoreRange.min}–{scoreRange.max}%</span></div>}
       <div className="relative mt-6 min-h-0 flex-1">
         <div ref={tableScrollRef} className="h-full overflow-auto overscroll-contain [scrollbar-gutter:stable]">
           <div className="min-w-[1224px]">
