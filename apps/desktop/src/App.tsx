@@ -645,7 +645,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
         <ScrollFade strength={tableHorizontalFade} direction="horizontal" targetRef={tableScrollRef} />
       </div>
     </div>
-    <FloatingActions visible={selected.length > 0} primary={view === "review" ? "Spam markieren" : "Kein Spam"} onPrimary={() => void review(view === "review" ? "confirm" : "reject")} onCancel={() => setSelected([])} />
+    <FloatingActions visible={selected.length > 0} primary={`${view === "review" ? "Spam markieren" : "Kein Spam"} (${selected.length})`} onPrimary={() => void review(view === "review" ? "confirm" : "reject")} onCancel={() => setSelected([])} />
   </div>
 }
 
