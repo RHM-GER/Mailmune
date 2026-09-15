@@ -470,6 +470,21 @@ function DateRangeDialog({ open, onOpenChange, initial, onApply }: { open: boole
   </Dialog>
 }
 
+// ScoreRangeFilter is a compact Von/Bis slider pair (0-100 %) that narrows the
+// review table by decision score. Two native range inputs keep it dependency-
+// free; min never exceeds max and vice versa.
+function ScoreRangeFilter({ min, max, onChange }: { min: number; max: number; onChange: (min: number, max: number) => void }) {
+  return (
+    <div className="flex h-[52px] shrink-0 items-center gap-2.5 rounded-md border border-white/10 bg-white/[0.05] px-3.5">
+      <Gauge className="size-4 shrink-0 text-[#888]" />
+      <span className="shrink-0 text-xs text-[#888]">Score</span>
+      <input type="range" min={0} max={100} step={1} value={min} aria-label="Score von" onChange={(event) => onChange(Math.min(Number(event.target.value), max), max)} className="w-20 accent-[#ff6b2c]" />
+      <input type="range" min={0} max={100} step={1} value={max} aria-label="Score bis" onChange={(event) => onChange(min, Math.max(Number(event.target.value), min))} className="w-20 accent-[#ff6b2c]" />
+      <span className="shrink-0 font-mono text-xs text-[#ccc]">{min}–{max}%</span>
+    </div>
+  )
+}
+
 function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean }) {
   const tableScrollRef = useRef<HTMLDivElement>(null)
   const tableFade = useScrollFade(tableScrollRef)
@@ -488,17 +503,22 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
     try { const raw = localStorage.getItem("mailmune.reviewCustomRange"); return raw ? (JSON.parse(raw) as { from: string; to: string }) : null } catch { return null }
   })
   const [customOpen, setCustomOpen] = useState(false)
+  const [scoreRange, setScoreRange] = useState<{ min: number; max: number }>(() => {
+    try { const raw = localStorage.getItem("mailmune.reviewScoreRange"); return raw ? (JSON.parse(raw) as { min: number; max: number }) : { min: 0, max: 100 } } catch { return { min: 0, max: 100 } }
+  })
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [referenceTime] = useState(() => Date.now())
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "receivedAt", direction: "desc" })
-  const filtersActive = range !== "all" || (view === "review" && reviewFilter !== "review")
+  const scoreFilterActive = scoreRange.min > 0 || scoreRange.max < 100
+  const filtersActive = range !== "all" || scoreFilterActive || (view === "review" && reviewFilter !== "review")
   useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
   useEffect(() => { localStorage.setItem("mailmune.reviewFilter", reviewFilter) }, [reviewFilter])
   useEffect(() => { localStorage.setItem("mailmune.reviewRange.v2", range) }, [range])
   useEffect(() => { if (customRange) localStorage.setItem("mailmune.reviewCustomRange", JSON.stringify(customRange)) }, [customRange])
-  const resetFilters = () => { setRange("all"); setReviewFilter("review"); setSelected([]) }
+  useEffect(() => { localStorage.setItem("mailmune.reviewScoreRange", JSON.stringify(scoreRange)) }, [scoreRange])
+  const resetFilters = () => { setRange("all"); setReviewFilter("review"); setScoreRange({ min: 0, max: 100 }); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
     const customFrom = range === "custom" && customRange ? new Date(customRange.from + "T00:00:00").getTime() : null
@@ -512,10 +532,10 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
     // damit jede gespeicherte Nachricht – auch nicht markierte – sichtbar ist
     // und inspectiert werden kann. TODO(revert): `item.score >= 0.6 &&` vor dem
     // Status-Filter wieder einfuegen vor dem Release (siehe TODO.md „Testmodus").
-    return decisions.filter((item) => (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && inRange(item.receivedAt) && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
+    return decisions.filter((item) => (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && inRange(item.receivedAt) && item.score * 100 >= scoreRange.min && item.score * 100 <= scoreRange.max && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
       if (!sort.direction) return 0; const left = sort.key === "category" ? spamCategory(a) : a[sort.key]; const right = sort.key === "category" ? spamCategory(b) : b[sort.key]; const result = typeof left === "number" ? left - Number(right) : String(left).localeCompare(String(right), "de"); return sort.direction === "asc" ? result : -result
     })
-  }, [decisions, view, reviewFilter, range, customRange, query, sort, referenceTime])
+  }, [decisions, view, reviewFilter, range, customRange, scoreRange, query, sort, referenceTime])
   const toggleAll = () => setSelected(selected.length === filtered.length ? [] : filtered.map((item) => item.id))
   const changeView = (nextView: "review" | "spam") => { setSelected([]); setView(nextView) }
   const review = async (action: "confirm" | "reject") => {
@@ -538,6 +558,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
           <FilterToolbarButton active={filtersActive} open={filterOpen} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
+          {filterOpen && <><ToolbarConnector /><ScoreRangeFilter min={scoreRange.min} max={scoreRange.max} onChange={(min, max) => { setSelected([]); setScoreRange({ min, max }) }} /></>}
           {range === "custom" && <button onClick={() => setCustomOpen(true)} className="ml-2 flex h-[52px] shrink-0 items-center gap-2 rounded-md border border-white! bg-white! px-3.5 text-sm text-[#171717]! transition-colors hover:bg-white/90"><CalendarDays className="size-4" />{customRange ? `${formatShortDate(customRange.from)} – ${formatShortDate(customRange.to)}` : "Zeitraum wählen"}</button>}
           <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next && !customRange && range === "custom") setRange("all") }} initial={customRange} onApply={(picked) => { setCustomRange(picked); setRange("custom"); setSelected([]) }} />
         </div>
