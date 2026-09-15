@@ -287,13 +287,17 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			IdempotencyKey: fmt.Sprintf("scan:%s:%d:%d:%s", account.ID, message.UIDValidity, message.UID, message.Folder),
 			ReceivedAt: message.ReceivedAt, CreatedAt: time.Now().UTC(),
 		}
-		if err := s.store.SaveDecision(context.Background(), decision); err != nil {
+		// SaveDecision deduplicates on (account, validity, uid, folder); the
+		// returned ID is the stored row's ID, which may differ from the freshly
+		// generated one after a resync. Features must attach to the stored ID.
+		storedID, _, err := s.store.SaveDecision(context.Background(), decision)
+		if err != nil {
 			return err
 		}
 		// Keep the compact feature vector so a confirmed review can train the
 		// local model later. It is deleted after training or purged after 180
 		// days; it never contains raw message text.
-		if err := s.store.SaveDecisionFeatures(context.Background(), decision.ID, features); err != nil {
+		if err := s.store.SaveDecisionFeatures(context.Background(), storedID, features); err != nil {
 			return err
 		}
 		result.processed++

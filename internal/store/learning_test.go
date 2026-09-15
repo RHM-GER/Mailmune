@@ -45,6 +45,38 @@ func TestLearningModelRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveDecisionDedupReturnsExistingID(t *testing.T) {
+	store := openTestStore(t)
+	insertTestAccount(t, store, "dedup-1")
+	ctx := context.Background()
+
+	original := domain.MessageDecision{
+		ID: "orig-1", AccountID: "dedup-1", UIDValidity: 5, UID: 7, MessageIDHash: "h",
+		OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "a@b.example", Subject: "s",
+		Score: 0.7, Status: domain.StatusPending, IdempotencyKey: "k-dedup",
+		ReceivedAt: time.Now(), CreatedAt: time.Now(),
+	}
+	storedID, created, err := store.SaveDecision(ctx, original)
+	if err != nil || !created || storedID != "orig-1" {
+		t.Fatalf("first insert: id=%s created=%v err=%v", storedID, created, err)
+	}
+
+	// Same message coordinates, fresh ID (as after a resync): the insert is a
+	// no-op and the EXISTING id must come back so dependent rows attach.
+	duplicate := original
+	duplicate.ID = "dup-2"
+	duplicate.IdempotencyKey = "k-dedup-2"
+	storedID, created, err = store.SaveDecision(ctx, duplicate)
+	if err != nil || created || storedID != "orig-1" {
+		t.Fatalf("dedup: id=%s created=%v err=%v", storedID, created, err)
+	}
+
+	// Features attached to the returned ID must not violate the FK.
+	if err := store.SaveDecisionFeatures(ctx, storedID, map[string]int{"token": 1}); err != nil {
+		t.Fatalf("features on deduped decision failed: %v", err)
+	}
+}
+
 func TestDecisionFeaturesLifecycle(t *testing.T) {
 	store := openTestStore(t)
 	insertTestAccount(t, store, "learn-2")
@@ -56,7 +88,7 @@ func TestDecisionFeaturesLifecycle(t *testing.T) {
 		Score: 0.7, Status: domain.StatusPending, IdempotencyKey: "k1",
 		ReceivedAt: time.Now(), CreatedAt: time.Now(),
 	}
-	if err := store.SaveDecision(ctx, decision); err != nil {
+	if _, _, err := store.SaveDecision(ctx, decision); err != nil {
 		t.Fatal(err)
 	}
 	features := map[string]int{"gewinn": 2, "dom:b.example": 1}
@@ -91,7 +123,7 @@ func TestPurgeRemovesOldDecisionFeatures(t *testing.T) {
 		Score: 0.7, Status: domain.StatusPending, IdempotencyKey: "k2",
 		ReceivedAt: time.Now().AddDate(0, -8, 0), CreatedAt: time.Now().AddDate(0, -8, 0),
 	}
-	if err := store.SaveDecision(ctx, decision); err != nil {
+	if _, _, err := store.SaveDecision(ctx, decision); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SaveDecisionFeatures(ctx, "dec-old", map[string]int{"alt": 1}); err != nil {

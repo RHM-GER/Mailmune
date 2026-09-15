@@ -33,7 +33,7 @@ func seedReviewedDecision(t *testing.T, db *store.SQLite, accountID string, uid 
 		IdempotencyKey: fmt.Sprintf("scan:%s:1:%d:INBOX", accountID, uid),
 		ReceivedAt: now, CreatedAt: now, ReviewedAt: &now,
 	}
-	if err := db.SaveDecision(context.Background(), decision); err != nil {
+	if _, _, err := db.SaveDecision(context.Background(), decision); err != nil {
 		t.Fatal(err)
 	}
 }

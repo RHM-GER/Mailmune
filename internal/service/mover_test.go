@@ -65,7 +65,7 @@ func seedDecision(t *testing.T, svc *Service, accountID string, server *imaptest
 		From: "spam@example.com", Subject: subject, Score: 0.99, Status: domain.StatusPending,
 		IdempotencyKey: "scan:" + accountID + ":" + subject, ReceivedAt: time.Now(), CreatedAt: time.Now(),
 	}
-	if err := svc.store.SaveDecision(context.Background(), decision); err != nil {
+	if _, _, err := svc.store.SaveDecision(context.Background(), decision); err != nil {
 		t.Fatal(err)
 	}
 	return decision

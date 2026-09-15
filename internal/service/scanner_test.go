@@ -160,6 +160,51 @@ func TestScanLifecycleIdempotencyAndResume(t *testing.T) {
 	}
 }
 
+func TestResyncRereadsMailboxWithoutForeignKeyViolation(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-resync")
+	now := time.Now()
+	spamMessage(server, "Gewinn: Konto gesperrt, sofort handeln", now.Add(-time.Hour))
+	spamMessage(server, "Zahlung fehlgeschlagen: sofort handeln", now)
+
+	// First pass classifies both spam candidates and stores their feature
+	// vectors against the freshly created decision rows.
+	if _, err := svc.StartScan(context.Background(), account.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("first run status = %s (%s)", run.Status, run.Error)
+	}
+	first, err := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if err != nil || len(first) != 2 {
+		t.Fatalf("decisions = %d, want 2 (err=%v)", len(first), err)
+	}
+
+	// A resync drops the UID state and re-reads the whole mailbox. Every
+	// decision now collides on (account, validity, uid, folder); features must
+	// reattach to the STORED row id, not the freshly generated one, or the
+	// foreign key on decision_features fires and the run fails.
+	if _, err := svc.StartScan(context.Background(), account.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	run = waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("resync status = %s (%s)", run.Status, run.Error)
+	}
+	second, err := db.ListDecisions(context.Background(), store.DecisionFilter{AccountID: account.ID})
+	if err != nil || len(second) != 2 {
+		t.Fatalf("decisions after resync = %d, want 2 (err=%v)", len(second), err)
+	}
+	// Feature vectors survive the resync so a later review can still train.
+	for _, decision := range second {
+		if _, ok, err := db.DecisionFeatures(context.Background(), decision.ID); err != nil || !ok {
+			t.Fatalf("features lost for %s after resync (ok=%v err=%v)", decision.ID, ok, err)
+		}
+	}
+}
+
 func TestScanStartIsIdempotentWhileRunning(t *testing.T) {
 	server := imaptest.New(t, rev2Caps())
 	svc, _ := newTestService(t, server)
@@ -263,7 +308,7 @@ func TestReviewTrainsLearnerFromConfirmedDecisions(t *testing.T) {
 		ReceivedAt: time.Now(), CreatedAt: time.Now(),
 	}
 	for _, decision := range []domain.MessageDecision{spamDecision, hamDecision} {
-		if err := db.SaveDecision(context.Background(), decision); err != nil {
+		if _, _, err := db.SaveDecision(context.Background(), decision); err != nil {
 			t.Fatal(err)
 		}
 	}

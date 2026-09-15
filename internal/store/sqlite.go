@@ -95,17 +95,35 @@ func (s *SQLite) Account(ctx context.Context, id string) (domain.AccountConfig, 
 	return domain.AccountConfig{}, sql.ErrNoRows
 }
 
-func (s *SQLite) SaveDecision(ctx context.Context, d domain.MessageDecision) error {
+// SaveDecision stores a decision idempotently. Deduplication happens on
+// (account, uidValidity, uid, originFolder): when a decision for the same
+// message already exists (e.g. after a resync), nothing is inserted and the
+// ID of the existing row is returned instead. Callers must use the returned
+// ID for dependent records such as decision features, because the passed
+// freshly generated ID was never stored in that case.
+func (s *SQLite) SaveDecision(ctx context.Context, d domain.MessageDecision) (string, bool, error) {
 	evidence, err := json.Marshal(d.Evidence)
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO decisions
+	result, err := s.db.ExecContext(ctx, `INSERT INTO decisions
 (id,account_id,uid_validity,uid,message_id_hash,origin_folder,current_folder,sender,subject,score,status,evidence_json,model_version,idempotency_key,received_at,created_at,reviewed_at)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,uid_validity,uid,origin_folder) DO NOTHING`,
 		d.ID, d.AccountID, d.UIDValidity, d.UID, d.MessageIDHash, d.OriginFolder, d.CurrentFolder, d.From, d.Subject, d.Score, d.Status,
 		string(evidence), d.ModelVersion, d.IdempotencyKey, formatTime(d.ReceivedAt), formatTime(d.CreatedAt), nullableTime(d.ReviewedAt))
-	return err
+	if err != nil {
+		return "", false, err
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		return d.ID, true, nil
+	}
+	var existingID string
+	err = s.db.QueryRowContext(ctx, "SELECT id FROM decisions WHERE account_id=? AND uid_validity=? AND uid=? AND origin_folder=?",
+		d.AccountID, d.UIDValidity, d.UID, d.OriginFolder).Scan(&existingID)
+	if err != nil {
+		return "", false, err
+	}
+	return existingID, false, nil
 }
 
 // UpdateDecisionFolder records the new current folder (and destination UID) of
