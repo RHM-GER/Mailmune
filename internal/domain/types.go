@@ -143,6 +143,16 @@ type DashboardSummary struct {
 	ProcessedWeek int     `json:"processedWeek"`
 }
 
+// DailyStat is one day of aggregated activity across all accounts. It feeds
+// the dashboard charts with real data instead of demo values.
+type DailyStat struct {
+	Day       string `json:"day"`
+	Processed int    `json:"processed"`
+	Moved     int    `json:"moved"`
+	Confirmed int    `json:"confirmed"`
+	Rejected  int    `json:"rejected"`
+}
+
 // FolderSyncState is the persisted UID synchronization state of one folder.
 // A change of UIDVALIDITY invalidates every stored UID and requires a safe
 // re-sync from UID 1; blind continuation is forbidden.

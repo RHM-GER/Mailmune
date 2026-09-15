@@ -188,6 +188,18 @@ export function calibration(accountId: string): Promise<CalibrationReport> {
   return agentRequest<CalibrationReport>("GET", `/v1/accounts/${accountId}/calibration`)
 }
 
+export interface DailyStat {
+  day: string
+  processed: number
+  moved: number
+  confirmed: number
+  rejected: number
+}
+
+export function stats(days = 400): Promise<DailyStat[]> {
+  return agentRequest<DailyStat[]>("GET", `/v1/stats?days=${days}`)
+}
+
 /**
  * Abonniert den Agent-Eventstream (Scan-Fortschritt, neue Entscheidungen,
  * Kontostatus). Liefert eine Funktion zum Abbestellen. Außerhalb der

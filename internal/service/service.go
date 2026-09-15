@@ -236,10 +236,31 @@ func (s *Service) Review(ctx context.Context, request domain.ReviewRequest) erro
 		return err
 	}
 	if request.Action == domain.ReviewConfirm || request.Action == domain.ReviewReject {
+		s.recordReviewStats(ctx, request)
 		s.trainFromReview(ctx, request)
 		s.applyMovesFromReview(ctx, request)
 	}
 	return nil
+}
+
+// recordReviewStats feeds the dashboard statistics with the human feedback of
+// the day, counted per account so mixed batches stay accurate.
+func (s *Service) recordReviewStats(ctx context.Context, request domain.ReviewRequest) {
+	decisions, err := s.store.DecisionsByIDs(ctx, request.DecisionIDs)
+	if err != nil {
+		return
+	}
+	counts := map[string]int{}
+	for _, decision := range decisions {
+		counts[decision.AccountID]++
+	}
+	for accountID, count := range counts {
+		if request.Action == domain.ReviewConfirm {
+			_ = s.store.RecordDailyStats(ctx, accountID, "", 0, 0, count, 0)
+		} else {
+			_ = s.store.RecordDailyStats(ctx, accountID, "", 0, 0, 0, count)
+		}
+	}
 }
 
 // applyMovesFromReview drives the move state machine for reviewed decisions.
@@ -325,6 +346,11 @@ func (s *Service) trainFromReview(ctx context.Context, request domain.ReviewRequ
 
 func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 	return s.store.Summary(ctx)
+}
+
+// Stats returns the aggregated daily activity series for the dashboard.
+func (s *Service) Stats(ctx context.Context, days int) ([]domain.DailyStat, error) {
+	return s.store.StatsSeries(ctx, days)
 }
 
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }

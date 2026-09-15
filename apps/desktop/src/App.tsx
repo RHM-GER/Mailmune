@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, scanRuns, setAccountModel, startScan, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, CalibrationReport, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
 type Range = "week" | "month" | "year" | "all"
@@ -88,6 +88,89 @@ const notifications = [
   { id: "model-available", title: "Lokales Modell verfügbar", detail: "qwen3:4b-instruct antwortet und kann validiert werden.", time: "Gestern", action: false },
 ]
 
+type ChartPoint = { label: string; spam: number; inbox: number; falsePositive: number }
+
+/**
+ * Baut die Chart-Daten aus echten Tagesstatistiken des Agenten. Die
+ * Browser-Vorschau ohne Agent nutzt weiterhin die Demo-Daten oben.
+ */
+function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
+  const byDay = new Map<string, DailyStat>()
+  for (const stat of stats) byDay.set(stat.day, stat)
+  const today = new Date()
+  const dayKey = (date: Date) => date.toISOString().slice(0, 10)
+  const accumulate = (label: string, days: string[]): ChartPoint => {
+    let spam = 0
+    let processed = 0
+    let rejected = 0
+    for (const day of days) {
+      const stat = byDay.get(day)
+      if (!stat) continue
+      spam += stat.moved + stat.confirmed
+      processed += stat.processed
+      rejected += stat.rejected
+    }
+    return { label, spam, inbox: Math.max(processed - spam, 0), falsePositive: rejected }
+  }
+  if (period === "Tag") return [accumulate("Heute", [dayKey(today)])]
+  if (period === "Woche") {
+    const labels = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"]
+    const out: ChartPoint[] = []
+    for (let index = 6; index >= 0; index--) {
+      const date = new Date(today.getTime() - index * 86400000)
+      out.push(accumulate(labels[date.getUTCDay()], [dayKey(date)]))
+    }
+    return out
+  }
+  if (period === "Monat") {
+    const out: ChartPoint[] = []
+    for (let week = 3; week >= 0; week--) {
+      const days: string[] = []
+      for (let index = week * 7 + 6; index >= week * 7; index--) {
+        days.push(dayKey(new Date(today.getTime() - index * 86400000)))
+      }
+      out.push(accumulate(`KW ${4 - week}`, days))
+    }
+    return out
+  }
+  if (period === "Jahr") {
+    const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+    const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11, 1))
+    const byMonth = new Map<string, { spam: number; processed: number; rejected: number }>()
+    for (const stat of stats) {
+      if (new Date(stat.day + "T00:00:00Z") < cutoff) continue
+      const key = stat.day.slice(0, 7)
+      const bucket = byMonth.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
+      bucket.spam += stat.moved + stat.confirmed
+      bucket.processed += stat.processed
+      bucket.rejected += stat.rejected
+      byMonth.set(key, bucket)
+    }
+    return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, bucket]) => ({
+      label: monthNames[Number(key.slice(5, 7)) - 1],
+      spam: bucket.spam,
+      inbox: Math.max(bucket.processed - bucket.spam, 0),
+      falsePositive: bucket.rejected,
+    }))
+  }
+  // Gesamt: nach Jahren gruppieren.
+  const byYear = new Map<string, { spam: number; processed: number; rejected: number }>()
+  for (const stat of stats) {
+    const key = stat.day.slice(0, 4)
+    const bucket = byYear.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
+    bucket.spam += stat.moved + stat.confirmed
+    bucket.processed += stat.processed
+    bucket.rejected += stat.rejected
+    byYear.set(key, bucket)
+  }
+  return [...byYear.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([year, bucket]) => ({
+    label: year,
+    spam: bucket.spam,
+    inbox: Math.max(bucket.processed - bucket.spam, 0),
+    falsePositive: bucket.rejected,
+  }))
+}
+
 export default function App() {
   const mainScrollRef = useRef<HTMLDivElement>(null)
   const mainFade = useScrollFade(mainScrollRef)
@@ -98,6 +181,7 @@ export default function App() {
   const [decisions, setDecisions] = useState<Decision[]>(isTauri() ? [] : demoDecisions)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [agentOnline, setAgentOnline] = useState(!isTauri())
+  const [dailyStats, setDailyStats] = useState<DailyStat[] | null>(null)
   const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number } | null>(null)
   const scanNoticeTimer = useRef<number | undefined>(undefined)
   const [compactNav, setCompactNav] = useState(false)
@@ -107,14 +191,16 @@ export default function App() {
   const refresh = async () => {
     if (!isTauri()) return
     try {
-      const [nextSummary, nextDecisions, nextAccounts] = await Promise.all([
+      const [nextSummary, nextDecisions, nextAccounts, nextStats] = await Promise.all([
         agentRequest<Summary>("GET", "/v1/summary"),
         agentRequest<Decision[]>("GET", "/v1/decisions?limit=250"),
         agentRequest<Account[]>("GET", "/v1/accounts"),
+        fetchStats(400).catch(() => null),
       ])
       setSummary(nextSummary)
       setDecisions(nextDecisions ?? [])
       setAccounts(nextAccounts ?? [])
+      setDailyStats(nextStats)
       setAgentOnline(true)
     } catch {
       setAgentOnline(false)
@@ -163,7 +249,7 @@ export default function App() {
           <div ref={mainScrollRef} className="h-full overflow-y-auto">
           {page === "settings" && <Header page={page} />}
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
-            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} />}
+            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} />}
             {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
             {page === "notifications" && <Notifications scrollRef={mainScrollRef} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} />}
@@ -253,13 +339,14 @@ function Header({ page }: { page: Page }) {
   </header>
 }
 
-function Dashboard({ summary, onReview, scrollRef, agentOnline }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean }) {
+function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean; dailyStats: DailyStat[] | null }) {
   const [period, setPeriod] = useState("Woche")
   const [showInbox, setShowInbox] = useState(true)
   const [showFalsePositives, setShowFalsePositives] = useState(true)
-  const activeChartData = chartDataByPeriod[period]
+  // Echte Agent-Daten in der Desktop-App; Demo-Daten nur in der Browser-Vorschau.
+  const activeChartData = dailyStats ? buildRealChartData(dailyStats, period) : chartDataByPeriod[period]
   const totals = activeChartData.reduce((sum, item) => ({ spam: sum.spam + item.spam, inbox: sum.inbox + item.inbox, falsePositive: sum.falsePositive + item.falsePositive }), { spam: 0, inbox: 0, falsePositive: 0 })
-  const spamShare = Math.round((totals.spam / (totals.spam + totals.inbox)) * 100)
+  const spamShare = totals.spam + totals.inbox > 0 ? Math.round((totals.spam / (totals.spam + totals.inbox)) * 100) : 0
   return <div className="dashboard-cards space-y-6">
     {isTauri() && !agentOnline && <p role="status" className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-xs text-[#999]">Der lokale Agent ist noch nicht erreichbar. Sobald er läuft, erscheinen hier echte Daten.</p>}
     {isTauri() && agentOnline && summary.accounts === 0 && <p role="status" className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-xs text-[#999]">Noch kein Postfach verbunden. Füge in den Einstellungen ein Postfach hinzu, um den lesenden Trockenlauf zu starten.</p>}

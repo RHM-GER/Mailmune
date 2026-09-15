@@ -294,8 +294,10 @@ func (m *Mover) updateDecisionFolder(ctx context.Context, op domain.MoveOperatio
 		return
 	}
 	folder := op.TargetFolder
-	if op.Direction == domain.MoveRestore {
-		folder = op.TargetFolder
+	if op.Direction == domain.MoveToSpam {
+		// Count review-triggered moves in the daily statistics. Scan-time
+		// automatic moves are counted by the scanner itself.
+		_ = m.scanner.store.RecordDailyStats(ctx, op.AccountID, "", 0, 1, 0, 0)
 	}
 	_ = m.scanner.store.UpdateDecisionFolder(ctx, op.DecisionID, folder, destUID, time.Now().UTC())
 }

@@ -41,6 +41,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.HandleFunc("GET /v1/summary", s.summary)
+	mux.HandleFunc("GET /v1/stats", s.stats)
 	mux.HandleFunc("GET /v1/accounts", s.accounts)
 	mux.HandleFunc("POST /v1/accounts", s.saveAccount)
 	mux.HandleFunc("POST /v1/accounts/{id}/test", s.testAccount)
@@ -100,6 +101,11 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.Summary(r.Context())
 	respond(w, "summary_failed", value, err)
+}
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	value, err := s.service.Stats(r.Context(), days)
+	respond(w, "stats_failed", value, err)
 }
 func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.Accounts(r.Context())

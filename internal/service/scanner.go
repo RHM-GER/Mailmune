@@ -318,6 +318,13 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		account.LastScanAt = ptrTime(time.Now().UTC())
 		account.UpdatedAt = time.Now().UTC()
 		_ = s.store.UpsertAccount(context.Background(), account)
+		// Feed the dashboard statistics: everything scanned today plus any
+		// automatic moves performed during this run.
+		scanned := 0
+		if outcome != nil {
+			scanned = outcome.Processed
+		}
+		_ = s.store.RecordDailyStats(context.Background(), account.ID, "", scanned, result.moved, 0, 0)
 		s.finish(run.ID, domain.ScanCompleted, "")
 	case errors.Is(syncErr, context.Canceled):
 		s.finish(run.ID, domain.ScanCancelled, "")
