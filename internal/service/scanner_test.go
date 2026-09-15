@@ -108,6 +108,10 @@ func TestNewAccountsAlwaysStartInDryRun(t *testing.T) {
 }
 
 func TestScanLifecycleIdempotencyAndResume(t *testing.T) {
+	// This test asserts the production contract: below-threshold (ham) messages
+	// are NOT stored. Disable the temporary debug mode that stores everything.
+	debugScanAllMessages = false
+	t.Cleanup(func() { debugScanAllMessages = true })
 	server := imaptest.New(t, rev2Caps())
 	svc, db := newTestService(t, server)
 	account := createTestAccount(t, svc, server, "acc-1")

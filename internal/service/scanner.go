@@ -60,6 +60,15 @@ type ScanEvent struct {
 // they cannot push cases over thresholds prematurely.
 const minLearningSamples = 20
 
+// debugScanAllMessages is a TEMPORARY testing aid. When true, every scanned
+// message is stored as a decision, including ones below the candidate
+// threshold, so the reviewer can inspect the score and evidence of messages
+// that were NOT flagged and give feedback to improve detection. It persists
+// harmless mail too, so it MUST be set back to false before release. It is a
+// var (not const) so tests can exercise the production candidate-only path.
+// TODO(revert): set to false again - tracked in TODO.md under "Testmodus".
+var debugScanAllMessages = true
+
 func newScanner(db *store.SQLite, secretStore secrets.Store, client *mailbox.Client, rules *classifier.Rules, ollama *provider.Ollama, hub *events.Hub) *Scanner {
 	return &Scanner{store: db, secrets: secretStore, mailbox: client, rules: rules, ollama: ollama, hub: hub, active: map[string]*activeRun{}}
 }
@@ -267,10 +276,17 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
 		s.consultModel(ctx, account, message, &classification, learned)
 		action := classifier.Decide(account.SafetyMode, classification)
-		if action == classifier.ActionIgnore {
+		isCandidate := action != classifier.ActionIgnore
+		// Testing mode (debugScanAllMessages): also store ignored messages so the
+		// reviewer can see why they were not flagged. In normal operation only
+		// candidates reach the review list and everything below the threshold is
+		// skipped without being persisted.
+		if !isCandidate && !debugScanAllMessages {
 			return nil
 		}
-		result.candidates++
+		if isCandidate {
+			result.candidates++
+		}
 		status := domain.StatusPending
 		current := message.Folder
 		if action == classifier.ActionMove && !account.DryRun {

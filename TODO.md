@@ -4,6 +4,12 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 ## In Arbeit
 
+### ⚠️ Testmodus (temporär – vor Release zurückbauen)
+
+- [ ] `debugScanAllMessages` in `internal/service/scanner.go` wieder auf `false` setzen (aktuell `true`): speichert zu Debug-Zwecken ALLE gescannten Nachrichten als Entscheidung, auch unter der 60-%-Kandidatenschwelle, damit Nicht-Erkennungen in der Zuordnung inspectiert werden können.
+- [ ] Den entfernten Kandidaten-Filter `item.score >= 0.6 &&` in `apps/desktop/src/App.tsx` (ReviewPage, `filtered`) wieder einfügen; siehe `TESTMODUS`-Kommentar dort.
+- [ ] Hinweis: Beide Änderungen gehören zusammen. Danach werden wieder nur Kandidaten (≥ 60 %) gespeichert und angezeigt; der Test `TestScanLifecycleIdempotencyAndResume` setzt die Variable bereits selbst auf `false`.
+
 ### P0 – Nutzbarer Sicherheitskern
 
 - [ ] Native Tauri-App auf Windows 11 vollständig kompilieren und Sidecar-Handshake prüfen (Rust-SSE-Weiterleiter ist per cargo check verifiziert; erster voller Desktop-Build steht aus)

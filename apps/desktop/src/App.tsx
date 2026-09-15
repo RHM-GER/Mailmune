@@ -508,7 +508,11 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
       if (customFrom !== null && customTo !== null) return time >= customFrom && time <= customTo
       return referenceTime - time <= days * 86_400_000
     }
-    return decisions.filter((item) => item.score >= 0.6 && (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && inRange(item.receivedAt) && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
+    // TESTMODUS: Der Kandidaten-Filter (score >= 0.6) ist bewusst entfernt,
+    // damit jede gespeicherte Nachricht – auch nicht markierte – sichtbar ist
+    // und inspectiert werden kann. TODO(revert): `item.score >= 0.6 &&` vor dem
+    // Status-Filter wieder einfuegen vor dem Release (siehe TODO.md „Testmodus").
+    return decisions.filter((item) => (view === "review" ? (reviewFilter === "review" ? ["pending", "moved"].includes(item.status) : item.status === "rejected") : item.status === "confirmed") && inRange(item.receivedAt) && `${item.from} ${item.subject}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
       if (!sort.direction) return 0; const left = sort.key === "category" ? spamCategory(a) : a[sort.key]; const right = sort.key === "category" ? spamCategory(b) : b[sort.key]; const result = typeof left === "number" ? left - Number(right) : String(left).localeCompare(String(right), "de"); return sort.direction === "asc" ? result : -result
     })
   }, [decisions, view, reviewFilter, range, customRange, query, sort, referenceTime])
@@ -553,7 +557,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
               <TableCell className={`px-4 ${shortDivider}`}><Checkbox checked={active} onCheckedChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></TableCell>
               <TableCell className={`px-3 text-sm ${shortDivider}`}><div className="flex min-w-0 items-center gap-2"><Tooltip><TooltipTrigger render={<button className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label="Mail öffnen" onClick={() => void openDefaultMailClient()}><MailOpen className="size-3.5" /></button>} /><TooltipContent side="top">Mail öffnen</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<span className="min-w-0 truncate" tabIndex={0}>{item.from}</span>} /><TooltipContent side="top">{item.from}</TooltipContent></Tooltip></div></TableCell>
               <TableCell className={`px-4 font-mono text-xs transition-colors ${shortDivider}`} style={{ color: scoreColor(item.score) }}>{Math.round(item.score * 100)} %</TableCell>
-              <TableCell className={`truncate px-4 text-xs text-[#888] ${shortDivider}`}>{spamCategory(item)}</TableCell>
+              <TableCell className={`px-4 text-xs text-[#888] ${shortDivider}`}><span className="flex items-center gap-1.5">{item.evidence.some((entry) => entry.group === "model") && <Tooltip><TooltipTrigger render={<Bot className="size-3.5 shrink-0 text-[#8ad08a]" aria-label="KI hat mitgeprüft" />} /><TooltipContent side="top">KI (Ollama) hat diese Mail mitgeprüft</TooltipContent></Tooltip>}<span className="truncate">{spamCategory(item)}</span></span></TableCell>
               <TableCell className={`px-4 ${shortDivider}`}><Tooltip><TooltipTrigger render={<p className="truncate text-sm" tabIndex={0}>{item.subject}</p>} /><TooltipContent side="top">{item.subject}</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<p className="mt-1 truncate text-xs text-[#666]" tabIndex={0}>{reason}</p>} /><TooltipContent side="top">{reason}</TooltipContent></Tooltip></TableCell>
               <TableCell className={`whitespace-nowrap px-4 text-xs text-[#888] ${shortDivider}`}>{new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.receivedAt))}</TableCell>
               <TableCell className="px-4"><StatusBadge status={item.status} /></TableCell>
