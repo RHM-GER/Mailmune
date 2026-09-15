@@ -940,11 +940,17 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   }, [account?.ollamaModel])
 
   useEffect(() => {
-    if (!selected && recommended.length > 0) {
-      const fallback = recommended.find((model) => model.default) ?? recommended[0]
-      setSelected(fallback.tag)
-    }
-  }, [recommended, selected])
+    if (selected) return
+    // Prefer a model that is actually installed so the capability test can
+    // succeed without a separate pull step; only fall back to a recommendation
+    // (shown with an install hint) when nothing is installed yet.
+    const fallback = recommended.find((model) => model.default && installed.includes(model.tag))?.tag
+      ?? recommended.find((model) => installed.includes(model.tag))?.tag
+      ?? installed[0]
+      ?? recommended.find((model) => model.default)?.tag
+      ?? recommended[0]?.tag
+    if (fallback) setSelected(fallback)
+  }, [recommended, installed, selected])
 
   if (!account) {
     return <EmptyConnectionCard text="Zuerst ein Postfach verbinden; das KI-Modell wird pro Postfach aktiviert." />
