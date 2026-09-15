@@ -335,6 +335,7 @@ func (s *SQLite) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 		if err := rows.Scan(&status, &count); err != nil {
 			return out, err
 		}
+		out.Scanned += count
 		switch domain.DecisionStatus(status) {
 		case domain.StatusPending:
 			out.Pending = count

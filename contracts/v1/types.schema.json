@@ -127,7 +127,7 @@
     },
     "Summary": {
       "type": "object",
-      "required": ["accounts", "pending", "moved", "confirmed", "rejected", "falsePositiveRate", "processedWeek"],
+      "required": ["accounts", "pending", "moved", "confirmed", "rejected", "falsePositiveRate", "processedWeek", "scanned"],
       "properties": {
         "accounts": { "type": "integer", "minimum": 0 },
         "pending": { "type": "integer", "minimum": 0 },
@@ -135,7 +135,8 @@
         "confirmed": { "type": "integer", "minimum": 0 },
         "rejected": { "type": "integer", "minimum": 0 },
         "falsePositiveRate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "processedWeek": { "type": "integer", "minimum": 0 }
+        "processedWeek": { "type": "integer", "minimum": 0 },
+        "scanned": { "type": "integer", "minimum": 0, "description": "Einmalig klassifizierte Nachrichten gesamt (dedupliziert; ein Rescan zählt nicht doppelt)" }
       },
       "additionalProperties": false
     },

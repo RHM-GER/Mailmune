@@ -33,6 +33,7 @@ export interface Summary {
   rejected: number
   falsePositiveRate: number
   processedWeek: number
+  scanned: number
 }
 
 export interface ScanRun {

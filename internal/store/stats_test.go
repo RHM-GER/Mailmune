@@ -112,8 +112,9 @@ func TestStatsByReceivedDayGroupsByReceivedDate(t *testing.T) {
 		byDay[stat.Day] = stat
 	}
 	d1 := byDay[day1.Format("2006-01-02")]
-	// spam=1, normal=1 -> Processed=2; Confirmed(spam)=1; Rejected(false pos)=1.
-	if d1.Processed != 2 || d1.Confirmed != 1 || d1.Rejected != 1 {
+	// Processed=total received (Eingang)=3; Confirmed(spam)=1; Rejected(false
+	// alarm)=1. Spam and false alarms are both subsets of the total.
+	if d1.Processed != 3 || d1.Confirmed != 1 || d1.Rejected != 1 {
 		t.Fatalf("day1 aggregation wrong: %+v", d1)
 	}
 	d2 := byDay[day2.Format("2006-01-02")]

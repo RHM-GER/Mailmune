@@ -30,15 +30,16 @@ ON CONFLICT(day,account_id) DO UPDATE SET processed=processed+excluded.processed
 // (not the scan/review activity date), so the dashboard shows when spam and
 // normal mail actually arrived instead of when Mailmune happened to process
 // them. Per received day it returns:
-//   - Confirmed = mail flagged as spam (score >= 0.60 candidate threshold) that
-//     was not rejected as a false positive,
-//   - Rejected  = false positives (a reviewer marked a flagged mail legit),
-//   - Processed = spam + normal, so the UI derives the normal inbox count as
-//     Processed - Confirmed,
+//   - Processed = TOTAL mail received that day (the "Eingang" whole),
+//   - Confirmed = spam: flagged (score >= 0.60) and NOT rejected, so a mail
+//     later marked as a false alarm leaves this count,
+//   - Rejected  = false alarms (a reviewer marked a flagged mail legit); these
+//     are a subset of the originally flagged mail,
 //   - Moved is unused (always 0).
-// Because it reads the decisions table, the "normal" series is only populated
-// when below-threshold messages are stored (the inspect-all test mode); in
-// normal operation only candidates are persisted.
+// Invariant: Confirmed + Rejected <= Processed (spam and false alarms are both
+// subsets of everything that arrived). Because it reads the decisions table,
+// the total only includes below-threshold mail when those are stored (the
+// inspect-all test mode); in normal operation only candidates are persisted.
 func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int) ([]domain.DailyStat, error) {
 	if days <= 0 || days > 3660 {
 		days = 30
@@ -46,7 +47,7 @@ func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int) ([]domain.Dai
 	since := time.Now().UTC().AddDate(0, 0, -days).Format(statsDay)
 	// received_at is RFC3339 UTC, so the first 10 chars are the YYYY-MM-DD day.
 	rows, err := s.db.QueryContext(ctx, `SELECT substr(received_at,1,10) AS day,
-COUNT(*) - SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END),
+COUNT(*),
 0,
 SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END),
 SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END)

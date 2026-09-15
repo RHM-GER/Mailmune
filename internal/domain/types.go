@@ -141,6 +141,9 @@ type DashboardSummary struct {
 	Rejected      int     `json:"rejected"`
 	FalsePositive float64 `json:"falsePositiveRate"`
 	ProcessedWeek int     `json:"processedWeek"`
+	// Scanned is the total number of unique messages ever classified (one row
+	// per message, deduplicated), so a rescan never double-counts.
+	Scanned int `json:"scanned"`
 }
 
 // DailyStat is one day of aggregated activity across all accounts. It feeds
