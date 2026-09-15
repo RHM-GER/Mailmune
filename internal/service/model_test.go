@@ -131,6 +131,48 @@ func TestScanPassesLearnedContextToModel(t *testing.T) {
 	}
 }
 
+func TestFullScanConsultsModelOnLowScoreMessage(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-ai-full")
+	ctx := context.Background()
+
+	account.OllamaModel = "test-model"
+	account.OllamaValidated = true
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = string(body)
+		verdict, _ := json.Marshal(map[string]any{"class": "ham", "score": 0.1, "reasonCodes": []string{"TEST"}})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": string(verdict)})
+	}))
+	t.Cleanup(fake.Close)
+	ollama, err := provider.NewOllama(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scanner.ollama = ollama
+
+	// A neutral message scores below the 0.25 incremental band, so only a full
+	// scan (resync) sends it to the model.
+	server.AddMessage("INBOX", "kollege@firma.example", "Meeting morgen", "Kurze Rueckfrage zum Termin", time.Now())
+
+	if _, err := svc.StartScan(ctx, account.ID, true); err != nil { // resync = full scan
+		t.Fatal(err)
+	}
+	run := waitForScan(t, svc, account.ID)
+	if run.Status != domain.ScanCompleted {
+		t.Fatalf("run: %s (%s)", run.Status, run.Error)
+	}
+	if captured == "" {
+		t.Fatal("a full scan must consult the model even for a low-score message")
+	}
+}
+
 func TestResetLearningClearsOnlyAccountModel(t *testing.T) {
 	svc, db := newModelService(t, "http://127.0.0.1:1")
 	seedAccount(t, db, "acc-reset")

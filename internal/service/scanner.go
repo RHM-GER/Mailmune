@@ -127,7 +127,7 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) 
 	s.mu.Unlock()
 
 	s.publish("scan.started", ScanEvent{Run: run})
-	go s.execute(runCtx, entry.done, account, password, run)
+	go s.execute(runCtx, entry.done, account, password, run, resync)
 	return run, nil
 }
 
@@ -164,7 +164,7 @@ func (s *Scanner) Wait(accountID string, timeout time.Duration) bool {
 	}
 }
 
-func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun) {
+func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool) {
 	defer close(done)
 	defer func() {
 		s.mu.Lock()
@@ -172,7 +172,7 @@ func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domai
 		s.mu.Unlock()
 	}()
 
-	result := s.scanAccount(ctx, account, password, run)
+	result := s.scanAccount(ctx, account, password, run, aiAll)
 
 	runRow, _, err := s.store.ScanRun(context.Background(), run.ID)
 	if err != nil {
@@ -219,7 +219,7 @@ func (s *Scanner) buildScorer(ctx context.Context, accountID string) *learning.M
 	}
 }
 
-func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun) scanResult {
+func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool) scanResult {
 	result := scanResult{}
 	folder := account.InboxFolder
 
@@ -278,7 +278,7 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		}
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
-		s.consultModel(ctx, account, message, &classification, learned)
+		s.consultModel(ctx, account, message, &classification, learned, aiAll)
 		action := classifier.Decide(account.SafetyMode, classification)
 		isCandidate := action != classifier.ActionIgnore
 		// Testing mode (debugScanAllMessages): also store ignored messages so the
@@ -376,13 +376,20 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	return result
 }
 
-// consultModel runs the optional local Ollama classification for ambiguous
-// cases and merges a validated verdict as a single independent signal group.
-func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext) bool {
+// consultModel runs the optional local Ollama classification and merges a
+// validated verdict as a single independent signal group. On an explicit full
+// scan (aiAll) it reviews every message that is not already near-certain spam,
+// so low-scoring mail the rules missed still gets a second opinion; on
+// incremental/new-mail scans only the ambiguous band is sent, keeping live
+// detection fast and the machine free.
+func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool) bool {
 	if !account.OllamaValidated || account.OllamaModel == "" {
 		return false
 	}
-	if classification.Score < 0.25 || classification.Score >= 0.98 {
+	if classification.Score >= 0.98 {
+		return false
+	}
+	if !aiAll && classification.Score < 0.25 {
 		return false
 	}
 	verdict, err := s.ollama.Classify(ctx, account.OllamaModel, message, account.Profile, learned)
@@ -393,7 +400,17 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 	classification.ModelValidated = true
 	classification.Evidence = append(classification.Evidence, domain.Evidence{Group: "model", Code: "local_model_" + verdict.Class, Weight: verdict.Score, Summary: "Lokales validiertes Modell: " + verdict.Class})
 	if verdict.Class == "spam" {
-		classification.Score = classification.Score*0.7 + verdict.Score*0.3
+		// The model is one independent signal group. A confident spam verdict
+		// lifts the message at least into the review list, so AI-caught spam is
+		// visible even when the rules scored it low. Decide() still needs >= 2
+		// independent groups to auto-move, so the LLM alone never moves mail.
+		blended := classification.Score*0.5 + verdict.Score*0.5
+		if verdict.Score >= 0.7 {
+			if floor := classifier.CandidateThreshold + 0.05; blended < floor {
+				blended = floor
+			}
+		}
+		classification.Score = blended
 		classification.IndependentGroups++
 	}
 	return true
