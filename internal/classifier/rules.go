@@ -26,6 +26,9 @@ const (
 	CodeFinancialPressure    = "financial_pressure"
 	CodeSubjectAnomaly       = "subject_anomaly"
 	CodeSubjectEmoji         = "subject_emoji"
+	CodeServerMarkedSpam     = "server_marked_spam"
+	CodeBlackmail            = "blackmail_threat"
+	CodeSpoofedSender        = "spoofed_sender"
 	CodeSuspiciousLinks      = "suspicious_links"
 	CodeURLShortener         = "url_shortener"
 	CodeListUnsubscribe      = "list_unsubscribe"
@@ -55,6 +58,12 @@ var (
 	// uses them, while spam and marketing do, so they are a weak indicator. The
 	// ranges start at U+2600; ordinary text, digits and umlauts never match.
 	emojiInSubject = regexp.MustCompile(`[\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]`)
+	// The receiving mail server prepended its own spam tag to the subject
+	// ("*** Spam ***", "[Spam]", "Spam:"). Legitimate mail rarely carries these.
+	serverSpamMarker = regexp.MustCompile(`(?i)(\*{2,}\s*spam\s*\*{2,}|\[\s*spam\s*\]|^\s*spam\s*[:\-])`)
+	// Sextortion/blackmail: threats to publish intimate material or to contact
+	// the victim's family. Generic wording, no brand or data lists.
+	blackmailTerms = regexp.MustCompile(`(?i)(skandal|erpress|kompromittier|video\s+wird.{0,30}(gesendet|geschickt|veröffentlicht|weitergegeben)|an\s+(ihre|deine)\s+familie|ich\s+habe\s+(dich|sie)\s+(gefilmt|aufgenommen|mitgeschnitten))`)
 )
 
 // StatisticalScorer evaluates learned token features. The local learner
@@ -168,6 +177,12 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 	if machineGeneratedLabel(senderDomain) {
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeMachineGenerated, Weight: 0.45, Summary: "Absenderdomain wirkt automatisch zusammengesetzt (unübliche Länge/Ziffern/Vokalanteil)"})
 	}
+	// An incoming message whose From claims the account owner's own domain is
+	// very likely spoofed (e.g. sextortion forging the victim's address). The
+	// owner rarely mails themselves; a known correspondent is excluded.
+	if own := strings.ToLower(strings.TrimSpace(msg.OwnDomain)); own != "" && senderDomain == own && !msg.KnownCorrespondent {
+		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSpoofedSender, Weight: 0.45, Summary: "Absender gibt die eigene Domain an – bei eingehender Mail wahrscheinlich gefälscht (Spoofing)"})
+	}
 }
 
 // machineGeneratedLabel reports whether a domain label looks concatenated or
@@ -241,6 +256,15 @@ func (r *Rules) stageContent(msg domain.MessageFeatures, evidence *[]domain.Evid
 	// legitimate newsletters/personal mail below the threshold on its own.
 	if emojiInSubject.MatchString(subject) {
 		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeSubjectEmoji, Weight: 0.15, Summary: "Emojis im Betreff – unüblich für seriöse/formelle Nachrichten"})
+	}
+	// The receiving mail server already tagged the subject as spam. A strong,
+	// wording-independent signal; legitimate mail rarely carries these markers.
+	if serverSpamMarker.MatchString(subject) {
+		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeServerMarkedSpam, Weight: 0.55, Summary: "Eingangs-Server hat die Mail als Spam markiert (Betreff-Marker)"})
+	}
+	// Sextortion/blackmail: threatening to publish material or contact family.
+	if blackmailTerms.MatchString(combined) {
+		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeBlackmail, Weight: 0.7, Summary: "Erpressungs-/Sextortion-Drohung (Veröffentlichung, Familie)"})
 	}
 }
 

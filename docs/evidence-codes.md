@@ -23,8 +23,11 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `content` | `financial_pressure` | Spam | Finanzielle Druckformulierung (offene Zahlung, Mahnung, Inkasso) |
 | `content` | `subject_anomaly` | Spam | Auffällige Zeichensetzung (`!!`) oder Blockschrift im Betreff |
 | `content` | `subject_emoji` | Spam | Emojis/Piktogramme im Betreff – unüblich für seriöse/formelle Nachrichten (schwaches Signal, hebt den Score nur in Kombination) |
+| `content` | `server_marked_spam` | Spam | Der Eingangs-Server hat die Mail bereits als Spam markiert (Betreff-Marker wie `*** Spam ***`, `[Spam]`, `Spam:`) |
+| `content` | `blackmail_threat` | Spam | Erpressung/Sextortion: Drohung mit Veröffentlichung von Video/Fotos oder Kontakt zur Familie |
 | `sender_integrity` | `sender_digit_pattern` | Spam | Absenderdomain mit langen Ziffernfolgen (≥ 4) – maschinell erzeugt |
 | `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
+| `sender_integrity` | `spoofed_sender` | Spam | Eingehende Mail gibt die eigene Kontodomain als Absender an – sehr wahrscheinlich gefälscht (Spoofing, z. B. Sextortion) |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |

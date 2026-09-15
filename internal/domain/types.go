@@ -69,6 +69,10 @@ type MessageFeatures struct {
 	MessageID            string               `json:"messageId"`
 	From                 string               `json:"from"`
 	FromDomain           string               `json:"fromDomain"`
+	// OwnDomain is the account owner's domain (derived from the IMAP login).
+	// An INCOMING message whose From claims this domain is very likely spoofed
+	// (e.g. sextortion that forges the victim's own address).
+	OwnDomain            string               `json:"ownDomain"`
 	ReplyTo              string               `json:"replyTo"`
 	Subject              string               `json:"subject"`
 	Text                 string               `json:"-"`

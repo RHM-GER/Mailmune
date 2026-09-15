@@ -257,7 +257,7 @@ func readLiteralBounded(reader io.Reader, limit int64) ([]byte, error) {
 }
 
 func buildFeatures(account domain.AccountConfig, folder string, uidValidity uint32, fetched *fetchedMessage) domain.MessageFeatures {
-	features := domain.MessageFeatures{AccountID: account.ID, UIDValidity: uidValidity, UID: uint32(fetched.uid), Folder: folder, Subject: fetched.envelope.Subject, MessageID: fetched.envelope.MessageID, ReceivedAt: fetched.internalDate}
+	features := domain.MessageFeatures{AccountID: account.ID, UIDValidity: uidValidity, UID: uint32(fetched.uid), Folder: folder, Subject: fetched.envelope.Subject, MessageID: fetched.envelope.MessageID, ReceivedAt: fetched.internalDate, OwnDomain: classifier.ExtractDomain(account.Username)}
 	if len(fetched.envelope.From) > 0 {
 		features.From = fetched.envelope.From[0].Addr()
 		features.FromDomain = classifier.ExtractDomain(features.From)

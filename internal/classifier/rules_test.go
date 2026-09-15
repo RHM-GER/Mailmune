@@ -204,6 +204,37 @@ func TestSubjectEmojiIsWeakIndicator(t *testing.T) {
 	}
 }
 
+func TestGenericSpamSignalsServerMarkerBlackmailSpoofing(t *testing.T) {
+	rules := NewRules()
+
+	// The receiving server tagged the subject as spam.
+	marked := rules.Classify(domain.MessageFeatures{From: "x@partner.example", FromDomain: "partner.example", Subject: "*** Spam *** Bitcoin Investment"}, domain.MailboxProfile{})
+	if findEvidence(marked.Evidence, CodeServerMarkedSpam) == nil {
+		t.Fatalf("server spam marker missing: %+v", marked.Evidence)
+	}
+
+	// Sextortion / blackmail threat reaches the review threshold on its own.
+	blackmail := rules.Classify(domain.MessageFeatures{From: "x@partner.example", FromDomain: "partner.example", Subject: "Ihr Video wird an Ihre Familie gesendet"}, domain.MailboxProfile{})
+	if findEvidence(blackmail.Evidence, CodeBlackmail) == nil {
+		t.Fatalf("blackmail signal missing: %+v", blackmail.Evidence)
+	}
+	if blackmail.Score < CandidateThreshold {
+		t.Fatalf("sextortion should reach the review threshold, got %.2f", blackmail.Score)
+	}
+
+	// An incoming mail claiming the owner's own domain is flagged as spoofing.
+	spoof := rules.Classify(domain.MessageFeatures{From: "info@eigene-domain.de", FromDomain: "eigene-domain.de", OwnDomain: "eigene-domain.de", Subject: "Rechnung"}, domain.MailboxProfile{})
+	if findEvidence(spoof.Evidence, CodeSpoofedSender) == nil {
+		t.Fatalf("spoofed sender missing: %+v", spoof.Evidence)
+	}
+
+	// A known correspondent on the same domain must NOT be flagged as spoofing.
+	colleague := rules.Classify(domain.MessageFeatures{From: "kollegin@firma.example", FromDomain: "firma.example", OwnDomain: "firma.example", Subject: "Meeting morgen", KnownCorrespondent: true}, domain.MailboxProfile{})
+	if findEvidence(colleague.Evidence, CodeSpoofedSender) != nil {
+		t.Fatalf("known correspondent must not be flagged as spoofing: %+v", colleague.Evidence)
+	}
+}
+
 func withSubject(msg domain.MessageFeatures, subject string) domain.MessageFeatures {
 	msg.Subject = subject
 	return msg
