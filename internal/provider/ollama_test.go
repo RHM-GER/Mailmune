@@ -92,6 +92,25 @@ func TestClassifyIncludesLearnedContext(t *testing.T) {
 	}
 }
 
+func TestClassifyReportsMissingModelActionably(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"model 'qwen3:4b-instruct-2507' not found, try pulling it first"}`))
+	}))
+	t.Cleanup(server.Close)
+	ollama, err := NewOllama(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ollama.Classify(context.Background(), "qwen3:4b-instruct-2507", domain.MessageFeatures{}, domain.MailboxProfile{}, nil)
+	if err == nil {
+		t.Fatal("expected an error for a missing model")
+	}
+	if !strings.Contains(err.Error(), "ollama pull qwen3:4b-instruct-2507") {
+		t.Fatalf("error must tell the user how to install the model: %v", err)
+	}
+}
+
 func TestClassifyRejectsContractViolations(t *testing.T) {
 	cases := map[string]func() (int, string){
 		"broken json":   func() (int, string) { return http.StatusOK, `{"response": "this is not json"}` },

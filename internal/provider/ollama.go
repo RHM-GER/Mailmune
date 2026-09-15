@@ -197,8 +197,14 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		// Include Ollama's own message so a wrong/missing model tag or an
-		// unsupported structured-output request is diagnosable in the UI.
+		// A 404 from /api/generate means the model tag is not installed locally.
+		// Return an actionable message instead of a bare status so the UI can
+		// tell the user exactly how to fix it.
+		if resp.StatusCode == http.StatusNotFound {
+			return ModelVerdict{}, fmt.Errorf("Modell %q ist nicht in Ollama installiert. In einem Terminal ausführen: ollama pull %s", model, model)
+		}
+		// Include Ollama's own message so an unsupported structured-output
+		// request or other error is diagnosable in the UI.
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return ModelVerdict{}, fmt.Errorf("ollama returned %s: %s", resp.Status, strings.TrimSpace(string(detail)))
 	}
