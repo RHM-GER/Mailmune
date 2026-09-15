@@ -35,7 +35,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Geheimnisse nur im Schlüsselbund, Profile/Lernmerkmale in SQLite, keine dauerhaften Nachrichtentexte
 - [x] Nummerierte vorwärtslaufende Datenbankmigrationen
 - [ ] Backup und Export von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung (Import der Lern-Baseline existiert bereits)
-- [ ] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert
+- [x] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert (Methoden-Audit des IMAP-Clients plus Move-Erhaltungs- und Purge-Sicherheitstests)
 - [ ] Externe Blacklists nur mit Herkunft, Lizenz, Signatur/Hash, Aktualitätsprüfung und Rollback evaluieren
 - [ ] Blacklist-Updates ohne Telemetrie und unabhängig von App-Releases konzipieren
 - [ ] Externe Client-Bewegungen (Thunderbird/Outlook) als Feedback erkennen, ohne Schleifen
