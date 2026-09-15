@@ -859,10 +859,13 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     setStatus("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)")
     try {
       const result = await validateAccountModel(account.id, selected)
-      const invalid = result.report.cases.filter((item) => !item.valid).length
+      const invalidCases = result.report.cases.filter((item) => !item.valid)
+      // Surface the real cause (e.g. "model not found" or the raw output) so a
+      // failure is diagnosable instead of an opaque count.
+      const firstError = invalidCases.find((item) => item.error)?.error
       setStatus(result.report.passed
         ? `Fähigkeitstest bestanden: ${selected} ist aktiviert und analysiert unklare Fälle mit.`
-        : `Fähigkeitstest fehlgeschlagen (${invalid} ungültige Antworten). Das Modell bleibt deaktiviert.`)
+        : `Fähigkeitstest fehlgeschlagen (${invalidCases.length} ungültige Antworten). Das Modell bleibt deaktiviert.${firstError ? ` Ursache: ${firstError}` : ""}`)
       await refresh()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Fähigkeitstest fehlgeschlagen")
