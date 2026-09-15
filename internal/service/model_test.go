@@ -259,8 +259,8 @@ func TestModelCannotFloorLiftTrustedBrandMail(t *testing.T) {
 	if len(decisions) != 1 {
 		t.Fatalf("decisions = %d, want 1", len(decisions))
 	}
-	if decisions[0].Score >= 0.60 {
-		t.Fatalf("strong trust must not be floor-lifted into the review list by the model: %.3f", decisions[0].Score)
+	if decisions[0].Score >= 0.10 {
+		t.Fatalf("strong trust must fully block the model score lift (rules score is ~3%%), got %.3f", decisions[0].Score)
 	}
 	if decisions[0].Status != domain.StatusPending {
 		t.Fatalf("trusted brand mail must stay pending, got %s", decisions[0].Status)

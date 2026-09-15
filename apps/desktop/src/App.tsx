@@ -791,16 +791,19 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
     return () => window.clearTimeout(timeout)
   }, [visible, mounted])
   if (!mounted) return null
-  // Die weiße Pille gleitet beim Hover zwischen Speichern und Abbrechen; die
-  // Ein-/Ausfahr-Animation bleibt auf dem Container.
-  return <SegmentedControl
-    className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30 shadow-[0_30px_60px_rgba(0,0,0,.45)]`}
-    buttonClassName="px-4 text-sm"
-    ariaLabel={primary}
-    options={[{ value: "primary", label: primary, icon: Check, disabled }, { value: "cancel", label: "Abbrechen", icon: X }]}
-    value="primary"
-    onChange={(next) => { if (next === "cancel") onCancel(); else if (!disabled) onPrimary() }}
-  />
+  // Positions-Wrapper außen, damit sich `absolute` nicht mit dem `relative`
+  // des SegmentedControl-Roots beißt (Tailwind-stylesheet-Reihenfolge würde
+  // sonst `relative` gewinnen lassen und die Leiste auf volle Breite ziehen).
+  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30`}>
+    <SegmentedControl
+      className="shadow-[0_30px_60px_rgba(0,0,0,.45)]"
+      buttonClassName="px-4 text-sm"
+      ariaLabel={primary}
+      options={[{ value: "primary", label: primary, icon: Check, disabled }, { value: "cancel", label: "Abbrechen", icon: X }]}
+      value="primary"
+      onChange={(next) => { if (next === "cancel") onCancel(); else if (!disabled) onPrimary() }}
+    />
+  </div>
 }
 
 // Segmentiertes Steuerelement mit gleitender weißer Pille: Der Indikator folgt

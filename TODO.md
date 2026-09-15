@@ -4,6 +4,11 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 ## In Arbeit
 
+### ⚠️ Verifizierung aus Nutzer-Feedback (Testpostfach)
+
+- [ ] Nach dem nächsten „Neu prüfen“ kontrollieren: authentifizierte Markenmail (z. B. `businessprofile-noreply@google.com`) muss trotz KI-Votum „spam“ bei ~3–5 % liegen. Ursache der vorherigen 50 %: der KI-Blend hob den Regel-Score trotz starken Vertrauenssignals an; der Lift ist jetzt bei `StrongTrustSignal` komplett blockiert (Floor-Skip allein reichte nicht). Test: `TestModelCannotFloorLiftTrustedBrandMail` (< 10 %).
+- [ ] Erkennungsrate beobachten: Die Wikidata-Markendomain-Liste (TODO unten, CC0) ist erst als Evaluierung erfasst und noch NICHT eingebaut – Lookalikes wie `de-autokitdadacde.com` (56 %) sollen darüber und über den Lernfilter weiter steigen, ohne dass Nutzerdomains hartkodiert werden.
+
 ### ⚠️ Testmodus (temporär – vor Release zurückbauen)
 
 - [ ] `debugScanAllMessages` in `internal/service/scanner.go` wieder auf `false` setzen (aktuell `true`): speichert zu Debug-Zwecken ALLE gescannten Nachrichten als Entscheidung, auch unter der 60-%-Kandidatenschwelle, damit Nicht-Erkennungen in der Zuordnung inspectiert werden können.

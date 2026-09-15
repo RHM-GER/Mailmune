@@ -441,29 +441,32 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 		// with a tiny score), and the rules' score already encodes the
 		// deterministic evidence. Decide() still needs >= 2 independent groups
 		// to auto-move, so the LLM alone never moves mail.
-		switch {
-		case verdict.Score >= 0.7:
-			// Confident verdict: at least into the review list - unless the rules
-			// found a strong trust signal (e.g. authenticated canonical brand
-			// domain). Small local models are known to misjudge genuine brand
-			// mail as spam; trust signals must not be floor-lifted into the
-			// review list by the model alone.
-			blended := classification.Score*0.5 + verdict.Score*0.5
-			if !classification.StrongTrustSignal {
+		//
+		// A strong trust signal (authenticated canonical brand with aligned
+		// envelope, explicit allow-list, known correspondent) blocks the lift
+		// ENTIRELY: the model is known to misjudge genuine brand mail, and a
+		// blend would drag a ~3% rules score up to ~50% on a confident spam
+		// verdict. The evidence entry and the extra group are kept for
+		// transparency; the score stays what the deterministic rules say.
+		if !classification.StrongTrustSignal {
+			switch {
+			case verdict.Score >= 0.7:
+				// Confident verdict: at least into the review list.
+				blended := classification.Score*0.5 + verdict.Score*0.5
 				if floor := classifier.CandidateThreshold + 0.05; blended < floor {
 					blended = floor
 				}
+				if blended > classification.Score {
+					classification.Score = blended
+				}
+			case verdict.Score >= 0.5:
+				if blended := classification.Score*0.75 + verdict.Score*0.25; blended > classification.Score {
+					classification.Score = blended
+				}
 			}
-			if blended > classification.Score {
-				classification.Score = blended
-			}
-		case verdict.Score >= 0.5:
-			if blended := classification.Score*0.75 + verdict.Score*0.25; blended > classification.Score {
-				classification.Score = blended
-			}
+			// Low-confidence spam keeps the rules' score; the evidence entry and
+			// the extra independent group still count.
 		}
-		// Low-confidence spam keeps the rules' score; the evidence entry and the
-		// extra independent group still count.
 		classification.IndependentGroups++
 	}
 	// A strong trust signal caps the score below the review threshold: genuine

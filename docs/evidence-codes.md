@@ -44,11 +44,12 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 - `Authentication-Results` wird nur als nicht vertrauenswürdiges Eingangssignal
   verwendet und niemals als Beweis.
 - Ein starkes Vertrauenssignal (`StrongTrustSignal`) begrenzt den Score und
-  verhindert automatische Verschiebungen. Nach einer KI-Prüfung hält es die
-  Mail außerdem unterhalb der Review-Schwelle (60 %): Ein Modell-Votum allein
-  kann eine authentifizierte, envelope-ausgerichtete Marken- oder explizit
-  vertraute Mail nicht in die Verdachtsliste heben. Explizite Sperrlisten
-  (Deny-Regeln) stechen implizites Vertrauen weiterhin aus.
+  verhindert automatische Verschiebungen. Bei einer KI-Prüfung blockiert es
+  außerdem jede Score-Anhebung durch ein Spam-Votum des Modells: Eine
+  authentifizierte, envelope-ausgerichtete Marken- oder explizit vertraute
+  Mail bleibt auf dem Stand der deterministischen Regeln (typisch < 10 %),
+  auch wenn das Modell „spam“ sagt. Das Votum bleibt als Evidence sichtbar.
+  Explizite Sperrlisten (Deny-Regeln) stechen implizites Vertrauen weiterhin aus.
 - Der statistische Lerner wird ausschließlich aus menschlich bestätigten
   Reviews trainiert; ein Modell darf erst ab 20 bestätigten Beispielen und nur
   mit Beispielen aus beiden Klassen Beiträge liefern.
