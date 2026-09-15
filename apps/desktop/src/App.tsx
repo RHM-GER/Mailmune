@@ -89,6 +89,22 @@ const notifications = [
   { id: "model-available", title: "Lokales Modell verfügbar", detail: "qwen3:4b-instruct antwortet und kann validiert werden.", time: "Gestern", action: false },
 ]
 
+// Echte Benachrichtigungen aus dem Agent-Eventstream. Zeitstempel werden erst
+// beim Rendern formatiert, damit „Heute/Gestern“ über Neustarts korrekt bleibt.
+type AgentNotification = { id: string; title: string; detail: string; time: number; action: boolean }
+type NotificationItem = { id: string; title: string; detail: string; time: string; action: boolean }
+
+function formatNotificationTime(ms: number): string {
+  const date = new Date(ms)
+  const now = new Date()
+  const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000)
+  const time = date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+  if (diffDays === 0) return `Heute, ${time}`
+  if (diffDays === 1) return `Gestern, ${time}`
+  return `${date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}, ${time}`
+}
+
 type ChartPoint = { label: string; spam: number; inbox: number; falsePositive: number }
 
 /**
@@ -187,6 +203,15 @@ export default function App() {
   const [dailyStats, setDailyStats] = useState<DailyStat[] | null>(null)
   const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number } | null>(null)
   const scanNoticeTimer = useRef<number | undefined>(undefined)
+  // Echte Benachrichtigungen aus dem Eventstream; lokal persistiert, damit die
+  // Seite nach einem Neustart nicht leer ist. Demo-Einträge bleiben der
+  // Browser-Vorschau ohne Agent vorbehalten.
+  const [agentNotifications, setAgentNotifications] = useState<AgentNotification[]>(() => {
+    if (!isTauri()) return []
+    try { return (JSON.parse(localStorage.getItem("mailmune.notifications") ?? "[]") as AgentNotification[]).slice(0, 50) } catch { return [] }
+  })
+  useEffect(() => { if (isTauri()) localStorage.setItem("mailmune.notifications", JSON.stringify(agentNotifications)) }, [agentNotifications])
+  const pushNotification = (item: AgentNotification) => setAgentNotifications((current) => [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 50))
   const [compactNav, setCompactNav] = useState(false)
   const narrowApp = useMediaQuery("(max-width: 890px)")
   const effectiveCompactNav = narrowApp || compactNav
@@ -225,6 +250,18 @@ export default function App() {
         setScanNotice({ run: data.run, candidates: data.candidates })
         window.clearTimeout(scanNoticeTimer.current)
         scanNoticeTimer.current = window.setTimeout(() => setScanNotice(null), 8000)
+        if (data.run.status === "completed") {
+          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: (data.candidates ?? 0) > 0 })
+        } else if (data.run.status === "failed") {
+          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false })
+        } else if (data.run.status === "cancelled") {
+          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung abgebrochen", detail: "Der Lauf wurde manuell beendet.", time: Date.now(), action: false })
+        }
+      } else if (event.type === "schedule.deep_scan") {
+        pushNotification({ id: `deep-${Date.now()}`, title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false })
+      } else if (event.type === "schedule.error") {
+        const data = event.data as { accountId?: string; error?: string }
+        pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false })
       }
       void refresh()
     }
@@ -244,6 +281,23 @@ export default function App() {
     }
   }, [])
 
+  // Offene Prüffälle als echte, nachgeführte Benachrichtigung: ersetzt sich
+  // selbst, sobald sich die Anzahl ändert, und verschwindet bei null nicht
+  // spurlos – sie bleibt als erledigter Eintrag stehen.
+  useEffect(() => {
+    if (!isTauri()) return
+    if (summary.pending <= 0) {
+      setAgentNotifications((current) => current.filter((entry) => entry.id !== "review-required"))
+      return
+    }
+    setAgentNotifications((current) => {
+      const title = `${summary.pending} Fälle benötigen eine Prüfung`
+      const existing = current.find((entry) => entry.id === "review-required")
+      if (existing && existing.title === title) return current
+      return [{ id: "review-required", title, detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: Date.now(), action: true }, ...current.filter((entry) => entry.id !== "review-required")].slice(0, 50)
+    })
+  }, [summary.pending])
+
   return (
     <TooltipProvider>
       <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
@@ -259,7 +313,7 @@ export default function App() {
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
             {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} />}
             {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
-            {page === "notifications" && <Notifications scrollRef={mainScrollRef} />}
+            {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={isTauri() ? agentNotifications.map(({ time, ...rest }) => ({ ...rest, time: formatNotificationTime(time) })) : notifications} onReview={isTauri() ? () => setPage("review") : undefined} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} />}
           </div>
           </div>
@@ -765,7 +819,7 @@ function SortableHead({ label, name, sort, setSort, icon: HeadIcon, last = false
 
 function StatusBadge({ status }: { status: Decision["status"] }) { const labels = { pending: "Review", moved: "Review", confirmed: "Bestätigt", rejected: "Fehlalarm", deferred: "Später" }; return <Badge variant="outline" className="border-white/10 bg-white/[0.025] text-[#aaa]">{labels[status]}</Badge> }
 
-function Notifications({ scrollRef }: { scrollRef: React.RefObject<HTMLElement | null> }) {
+function Notifications({ scrollRef, items = notifications, onReview }: { scrollRef: React.RefObject<HTMLElement | null>; items?: NotificationItem[]; onReview?: () => void }) {
   const [view, setView] = useState<"open" | "archived">("open")
   const [archived, setArchived] = useState<Record<string, number>>(() => {
     try {
@@ -775,12 +829,12 @@ function Notifications({ scrollRef }: { scrollRef: React.RefObject<HTMLElement |
     } catch { return {} }
   })
   useEffect(() => { localStorage.setItem("mailmune.notificationArchive", JSON.stringify(archived)) }, [archived])
-  const visible = notifications.filter((item) => view === "archived" ? Boolean(archived[item.id]) : !archived[item.id])
+  const visible = items.filter((item) => view === "archived" ? Boolean(archived[item.id]) : !archived[item.id])
   const notificationSections = visible.map((item) => ({ id: `notification-${item.id}`, label: item.title }))
   return <div className="relative">
     <div className="flex items-start justify-between gap-6"><h1 className="pt-1 text-2xl font-medium tracking-tight">Benachrichtigungen</h1><div className="flex h-[52px] items-center rounded-md border border-white/10 bg-[#232323] p-1.5"><button onClick={() => setView("open")} className={`flex h-full items-center gap-2 rounded-l px-3.5 text-sm ${view === "open" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Offen<Bell className="size-4" /></button><button onClick={() => setView("archived")} className={`flex h-full items-center gap-2 rounded-r px-3.5 text-sm ${view === "archived" ? "bg-white text-[#171717]" : "bg-[#171717] text-[#a8a8a8]"}`}>Archiviert<Archive className="size-4" /></button></div></div>
     <div className="mt-12 max-w-4xl">
-    <div className="border-y border-white/[0.09]">{visible.map((item) => <div key={item.id} data-section-id={`notification-${item.id}`} className="flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0"><div className="relative flex size-9 shrink-0 items-center justify-center text-[#999]"><Bell className="size-4" />{item.action && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[#ff6b2c]" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>{item.action && view === "open" && <Button size="sm" variant="outline">Prüfen</Button>}<button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => setArchived((current) => { const next = { ...current }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; return next })}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button></div>)}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
+    <div className="border-y border-white/[0.09]">{visible.map((item) => <div key={item.id} data-section-id={`notification-${item.id}`} className="flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0"><div className="relative flex size-9 shrink-0 items-center justify-center text-[#999]"><Bell className="size-4" />{item.action && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[#ff6b2c]" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>{item.action && view === "open" && <Button size="sm" variant="outline" onClick={onReview}>Prüfen</Button>}<button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => setArchived((current) => { const next = { ...current }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; return next })}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button></div>)}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
     {view === "archived" && <p className="mt-3 text-right text-[11px] text-[#555]">Archivierte Einträge werden nach 180 Tagen entfernt.</p>}
     </div>
     <SectionIndicator items={notificationSections} scrollRef={scrollRef} />

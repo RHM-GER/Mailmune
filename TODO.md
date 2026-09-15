@@ -18,7 +18,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Reviewaktionen mit Verschiebung erst nach erfolgreichen MOVE-, Wiederholungs- und Absturztests aktivieren (Automatik zusätzlich durch Kalibrierungsgate gesperrt)
 - [x] UI und Agent verbinden; Demo-Daten klar von echten Daten trennen (Desktop startet leer, Browser-Vorschau mit Demo)
 - [x] Dashboard-Charts mit echten Verlaufsdaten verbinden
-- [ ] Benachrichtigungsseite mit echten Ereignissen verbinden
+- [x] Benachrichtigungsseite mit echten Ereignissen verbinden (Scan-Abschluss/-Fehler, Wochenprüfung, geplante Prüffehler, offene Prüffälle; lokal persistiert, Demo-Einträge nur in der Browser-Vorschau)
 
 ### P1 – UI-Konsolidierung
 
