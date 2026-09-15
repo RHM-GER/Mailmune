@@ -170,3 +170,41 @@ func TestKnownCorrespondentNeverFlaggedDespiteOddDomain(t *testing.T) {
 		t.Fatal("known correspondent must never be moved automatically")
 	}
 }
+
+func TestSubjectEmojiIsWeakIndicator(t *testing.T) {
+	rules := NewRules()
+
+	// Emoji alone: produces evidence but stays below the candidate threshold,
+	// so legitimate emoji-bearing mail (newsletters, personal) is not flagged.
+	plain := rules.Classify(domain.MessageFeatures{From: "freund@example.com", FromDomain: "example.com", Subject: "Hallo 👋"}, domain.MailboxProfile{})
+	if findEvidence(plain.Evidence, CodeSubjectEmoji) == nil {
+		t.Fatalf("emoji evidence missing: %+v", plain.Evidence)
+	}
+	if plain.Score >= CandidateThreshold {
+		t.Fatalf("emoji alone must stay below threshold, got %.2f", plain.Score)
+	}
+
+	// A formal/serious subject that already trips a content signal scores
+	// higher with an emoji than without it (the mismatch indicator).
+	base := domain.MessageFeatures{From: "service@bank.example", FromDomain: "bank.example"}
+	withEmoji := rules.Classify(withSubject(base, "Ihre Zahlung ist fehlgeschlagen ⚠️"), domain.MailboxProfile{})
+	withoutEmoji := rules.Classify(withSubject(base, "Ihre Zahlung ist fehlgeschlagen"), domain.MailboxProfile{})
+	if findEvidence(withEmoji.Evidence, CodeSubjectEmoji) == nil {
+		t.Fatalf("emoji evidence missing on formal subject: %+v", withEmoji.Evidence)
+	}
+	if withEmoji.Score <= withoutEmoji.Score {
+		t.Fatalf("emoji should raise the score: with=%.3f without=%.3f", withEmoji.Score, withoutEmoji.Score)
+	}
+
+	// Ordinary text and umlauts must never match the emoji ranges.
+	for _, subject := range []string{"Rechnung Nr. 2024-0815", "Grüße aus München", "ÄÖÜ ß – Meeting"} {
+		if findEvidence(rules.Classify(withSubject(base, subject), domain.MailboxProfile{}).Evidence, CodeSubjectEmoji) != nil {
+			t.Fatalf("false emoji hit for %q", subject)
+		}
+	}
+}
+
+func withSubject(msg domain.MessageFeatures, subject string) domain.MessageFeatures {
+	msg.Subject = subject
+	return msg
+}

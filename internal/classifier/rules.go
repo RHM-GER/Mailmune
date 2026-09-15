@@ -25,6 +25,7 @@ const (
 	CodeVerificationRequest  = "verification_request"
 	CodeFinancialPressure    = "financial_pressure"
 	CodeSubjectAnomaly       = "subject_anomaly"
+	CodeSubjectEmoji         = "subject_emoji"
 	CodeSuspiciousLinks      = "suspicious_links"
 	CodeURLShortener         = "url_shortener"
 	CodeListUnsubscribe      = "list_unsubscribe"
@@ -50,6 +51,10 @@ var (
 	digitAnywhere  = regexp.MustCompile(`[0-9]`)
 	doubleBang     = regexp.MustCompile(`!{2,}`)
 	uppercaseWord  = regexp.MustCompile(`\b[A-ZÄÖÜ]{6,}\b`)
+	// Emojis/pictographs in the subject. Genuine formal or business mail rarely
+	// uses them, while spam and marketing do, so they are a weak indicator. The
+	// ranges start at U+2600; ordinary text, digits and umlauts never match.
+	emojiInSubject = regexp.MustCompile(`[\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]`)
 )
 
 // StatisticalScorer evaluates learned token features. The local learner
@@ -230,6 +235,12 @@ func (r *Rules) stageContent(msg domain.MessageFeatures, evidence *[]domain.Evid
 	}
 	if doubleBang.MatchString(subject) || uppercaseWord.MatchString(subject) {
 		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeSubjectAnomaly, Weight: 0.15, Summary: "Auffällige Zeichensetzung oder Schreibung im Betreff"})
+	}
+	// Emojis in the subject are a weak mismatch signal: a message that poses as
+	// a serious/formal notice but uses emojis is unusual. Low weight keeps
+	// legitimate newsletters/personal mail below the threshold on its own.
+	if emojiInSubject.MatchString(subject) {
+		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeSubjectEmoji, Weight: 0.15, Summary: "Emojis im Betreff – unüblich für seriöse/formelle Nachrichten"})
 	}
 }
 
