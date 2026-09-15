@@ -45,6 +45,10 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Backup und Export von Profil- und Lernwissen mit Schema-, Versions- und Konfliktprüfung (Import der Lern-Baseline existiert bereits)
 - [x] Nachweisende Tests, dass keine Lösch-, Papierkorb- oder Aufbewahrungsfunktion existiert (Methoden-Audit des IMAP-Clients plus Move-Erhaltungs- und Purge-Sicherheitstests)
 - [ ] Externe Blacklists nur mit Herkunft, Lizenz, Signatur/Hash, Aktualitätsprüfung und Rollback evaluieren
+- [ ] Marken-Domain-Liste von KOR-Labs/logo-trust (`domain_names.json`, BIMI/Mark-Certificate-basiert) als Basis für den Ausbau von `brandTokens` (brand_impersonation + brand_aligned_domain) evaluieren: https://github.com/KOR-Labs/logo-trust
+  - ⚠️ Lizenz ist **CC-BY-SA-4.0** (nicht MIT, wie vermutet): ShareAlike-Pflicht bei Übernahme/Veröffentlichung eines abgeleiteten Datensatzes plus Namensnennung; kommerzielle Nutzung erlaubt, aber Copyleft-Folgewirkungen für eine ausgelieferte Kopie der Liste müssen vor Übernahme juristisch bewertet werden
+  - Alternativen Weg prüfen: Liste nur als Recherche-/Inspirationsquelle nutzen und eine eigene, kleine Liste allgemein bekannter Marken führen (Fakten wie „Marke X gehört Domain Y“ sind urheberrechtlich dünn), statt den Datensatz zu kopieren
+  - Repo-Aktivität ist gering (4 Commits, 0 Stars): Aktualität und Wartung vor jeder Übernahme prüfen; nur mit dokumentierter Herkunft und Version einbauen
 - [ ] Blacklist-Updates ohne Telemetrie und unabhängig von App-Releases konzipieren
 - [ ] Externe Client-Bewegungen (Thunderbird/Outlook) als Feedback erkennen, ohne Schleifen
 
