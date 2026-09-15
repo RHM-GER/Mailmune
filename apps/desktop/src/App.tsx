@@ -605,6 +605,18 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
+  // Aktives Konto: das erste nicht ausgeblendete, sonst das erste überhaupt.
+  const activeAccount = accounts.find((item) => !hiddenAccounts.includes(item.id)) ?? accounts[0]
+  // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
+  // gelesen. Konten laden aber asynchron und werden nach dem Speichern
+  // aktualisiert; ohne diese Synchronisierung zeigt die UI weiter den
+  // Standardwert, obwohl der Modus serverseitig korrekt gespeichert ist – das
+  // wirkt, als ob die Einstellung nicht übernommen wurde.
+  useEffect(() => {
+    if (!activeAccount) return
+    setMode(activeAccount.safetyMode ?? "safe")
+    setFolderName(activeAccount.spamFolder ?? "AI_SPAM_FILTER")
+  }, [activeAccount?.id, activeAccount?.safetyMode, activeAccount?.spamFolder])
   const runAccountAction = async (account: Account, action: "test" | "scan" | "resync") => {
     setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : action === "resync" ? "Postfach wird komplett neu geprüft …" : "Trockenlauf wird gestartet …" }))
     try {
@@ -643,7 +655,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   }
   const persistSafetyMode = async (nextMode: SafetyMode) => {
     setMode(nextMode)
-    const account = accounts.find((item) => !hiddenAccounts.includes(item.id)) ?? accounts[0]
+    const account = activeAccount
     if (!account) return
     try {
       // Sicherheitsmodus gehört zum Konto und wird serverseitig persistiert.
