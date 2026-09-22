@@ -186,7 +186,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Filter-Dropdowns: Best Practice prüfen – Optionen erschließen sich nicht ohne Durchklicken; gruppierte/labelte Darstellung erwägen
 - [ ] Filter-Zahlen (z. B. „Filter (88 Mails)", „Score 0–100%") einheitlich breit/fest, damit die Toolbar bei Änderung nicht horizontal verrutscht
 - [ ] Filter öffnen/schließen dauert etwas lange (Animation/Timing prüfen)
-- [ ] „Spam markieren"-Popup: dritter Button „Kein Spam" zwischen Spam markieren und Abbrechen; bei >2 Items Trennlinie zwischen nicht-aktiven Segmenten im Design der kleinen Tabellenzell-Trennlinien
+- [x] „Spam markieren"-Popup: dritter Button „Kein Spam" zwischen Spam markieren und Abbrechen; bei >2 Segmenten kurze Trennlinien zwischen nicht ausgewählten Elementen (Tabellenzell-Design)
 - [ ] „Spam markieren"-Erscheinen (FloatingActions) seit Slide-Animation im Review-Bereich verzögert – bei Speichern/Abbrechen in Einstellungen nicht; Performance prüfen
 - [ ] Mail-Öffnen-Button funktioniert noch nicht
 - [ ] Refresh-Button soll auch „Neue Mails?"-Prüfung auslösen und den vorhandenen Scan-Toast anzeigen
@@ -195,7 +195,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Modellwechsel: Speichern/Abbrechen-Warndialog, wenn bereits ein validiertes Modell genutzt wurde (Fortschritt/Konsistenz der KI-Ergebnisse)
 - [ ] „Erneut validieren"-Button entfernen; Validierung in die KI-Modell-Settings verlegen
 - [ ] „Aktiv"-Badge beim KI-Modell nicht grün – keine Random-Farben; Farbe nur in Sonderfällen (z. B. Success-Toast)
-- [ ] Wochenprüfung: Settings-Panel klappt beim Ausschalten nicht wieder ein
+- [x] Wochenprüfung: Settings-Panel klappt beim Ausschalten wieder ein
 - [ ] Lern-/Profiltransfer-Dialog: Export-Button (für anderen Rechner exportieren/weitergeben)
 - [ ] UI-Texte reduzieren: Erklärtexte in Tooltips/Dialoge verschieben, z. B. „Lokales Lernen aus bestätigten Reviews…", „Automatische Verschiebung – Noch keine bestätigten Entscheidungen…", „Ein KI-Ergebnis allein verschiebt niemals eine Mail…"
 - [ ] Verbindungs-Aktionsbuttons (Verbindung testen/prüfen/neu) gehören in die Settings des Mailprofils

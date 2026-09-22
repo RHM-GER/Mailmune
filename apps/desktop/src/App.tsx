@@ -745,7 +745,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
         <ScrollFade strength={tableHorizontalFade} direction="horizontal" targetRef={tableScrollRef} />
       </div>
     </div>
-    <FloatingActions visible={selected.length > 0} primary={`${view === "review" ? "Spam markieren" : "Kein Spam"} (${selected.length})`} onPrimary={() => void review(view === "review" ? "confirm" : "reject")} onCancel={() => setSelected([])} />
+    <FloatingActions visible={selected.length > 0} primary={`${view === "review" ? "Spam markieren" : "Kein Spam"} (${selected.length})`} onPrimary={() => void review(view === "review" ? "confirm" : "reject")} middle={view === "review" ? { label: `Kein Spam (${selected.length})`, onClick: () => void review("reject") } : undefined} onCancel={() => setSelected([])} />
   </div>
 }
 
@@ -826,7 +826,7 @@ function ScrollFade({ strength, direction = "vertical", compact = false, targetR
   return <div className="pointer-events-none absolute -bottom-[17px] inset-x-0 z-20 flex justify-center bg-[linear-gradient(to_top,rgba(23,23,23,1)_0%,rgba(23,23,23,0.98)_22%,rgba(23,23,23,0.78)_52%,rgba(23,23,23,0.28)_78%,transparent_100%)] pb-7 pt-24 transition-opacity duration-200" style={{ opacity: strength }}><button type="button" tabIndex={strength > 0 ? 0 : -1} aria-label="Weiter nach unten scrollen" onClick={scrollForward} className="pointer-events-auto flex h-[25px] w-11 items-center justify-center rounded-full border border-white/10 bg-[#232323]/90 backdrop-blur transition-colors hover:border-white/20 hover:bg-[#2b2b2b]"><ChevronDown className="size-3.5 text-[#777]" /></button></div>
 }
 
-function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = false }: { visible: boolean; primary: string; onPrimary: () => void; onCancel: () => void; disabled?: boolean }) {
+function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = false, middle }: { visible: boolean; primary: string; onPrimary: () => void; onCancel: () => void; disabled?: boolean; middle?: { label: string; onClick: () => void } }) {
   const [mounted, setMounted] = useState(visible)
   useEffect(() => {
     if (visible) { setMounted(true); return }
@@ -835,17 +835,22 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
     return () => window.clearTimeout(timeout)
   }, [visible, mounted])
   if (!mounted) return null
-  // Positions-Wrapper außen, damit sich `absolute` nicht mit dem `relative`
-  // des SegmentedControl-Roots beißt (Tailwind-stylesheet-Reihenfolge würde
-  // sonst `relative` gewinnen lassen und die Leiste auf volle Breite ziehen).
+  // Positionierung im äußeren Wrapper, damit sich `absolute` nicht mit dem
+  // `relative` des SegmentedControl-Roots beißt (Tailwind-stylesheet-Reihenfolge
+  // würde sonst `relative` gewinnen lassen und die Leiste auf volle Breite ziehen).
+  const options = [
+    { value: "primary" as const, label: primary, icon: Check, disabled },
+    ...(middle ? [{ value: "middle" as const, label: middle.label, icon: ShieldCheck }] : []),
+    { value: "cancel" as const, label: "Abbrechen", icon: X },
+  ]
   return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30`}>
     <SegmentedControl
       className="shadow-[0_30px_60px_rgba(0,0,0,.45)]"
       buttonClassName="px-4 text-sm"
       ariaLabel={primary}
-      options={[{ value: "primary", label: primary, icon: Check, disabled }, { value: "cancel", label: "Abbrechen", icon: X }]}
+      options={options}
       value="primary"
-      onChange={(next) => { if (next === "cancel") onCancel(); else if (!disabled) onPrimary() }}
+      onChange={(next) => { if (next === "cancel") onCancel(); else if (next === "middle") middle?.onClick(); else if (!disabled) onPrimary() }}
     />
   </div>
 }
@@ -865,16 +870,32 @@ function SegmentedControl<T extends string>({ options, value, onChange, size = "
   // Button (natürliche Breite), animiert über left/width mit Transition.
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [pill, setPill] = useState<{ left: number; width: number } | null>(null)
+  // Segmentgrenzen für die kurzen Trennlinien (gleiches Design wie die
+  // Zellentrennlinien der Tabelle); nur bei mehr als zwei Optionen.
+  const [edges, setEdges] = useState<number[]>([])
   useLayoutEffect(() => {
     const el = buttonRefs.current[pillIndex]
     if (!el) return
     const left = el.offsetLeft
     const width = el.offsetWidth
     setPill((prev) => (prev && prev.left === left && prev.width === width ? prev : { left, width }))
+    if (options.length > 2) {
+      const next: number[] = []
+      for (let index = 1; index < options.length; index++) {
+        const button = buttonRefs.current[index]
+        if (button) next.push(button.offsetLeft)
+      }
+      setEdges((prev) => (prev.length === next.length && prev.every((value, index) => value === next[index]) ? prev : next))
+    } else if (edges.length > 0) {
+      setEdges([])
+    }
   })
   return <div role="group" aria-label={ariaLabel} onMouseLeave={() => setHoverIndex(null)} className={`relative flex items-center rounded-md border border-white/10 bg-[#232323] ${size === "sm" ? "h-8 p-1" : "h-[52px] p-1.5"} ${className}`}>
     {/* Dunkler Track hinter den Buttons – wie vorher Teil des Designs. */}
     <span aria-hidden className="pointer-events-none absolute bg-[#171717]" style={{ top: pad, bottom: pad, left: pad, right: pad, borderRadius: size === "sm" ? 2 : 4 }} />
+    {/* Kurze Trennlinien an den Segmentgrenzen – nur zwischen nicht
+        ausgewählten Segmenten; neben/unter der Pille verschwinden sie. */}
+    {edges.map((left, index) => (index === pillIndex || index + 1 === pillIndex) ? null : <span key={index} aria-hidden className="pointer-events-none absolute top-1/2 h-4 w-px -translate-y-1/2 bg-white/10" style={{ left }} />)}
     {pill && <span aria-hidden className={`pointer-events-none absolute bg-white transition-all duration-200 ease-out motion-reduce:transition-none ${size === "sm" ? "rounded-sm" : "rounded"}`} style={{ top: pad, bottom: pad, left: pill.left, width: pill.width }} />}
     {options.map((option, index) => <button key={option.value} ref={(el) => { buttonRefs.current[index] = el }} type="button" disabled={option.disabled} aria-pressed={option.value === value} onClick={() => onChange(option.value)} onMouseEnter={() => setHoverIndex(index)} onFocus={() => setHoverIndex(index)} className={`relative z-10 flex h-full items-center gap-2 whitespace-nowrap transition-colors duration-200 motion-reduce:transition-none ${size === "sm" ? "rounded-sm px-2 text-[10px] font-medium" : buttonClassName ?? "px-3.5 text-sm"} ${pillIndex === index ? "text-[#171717]" : size === "sm" ? "text-[#666]" : "text-[#a8a8a8]"} disabled:cursor-not-allowed disabled:opacity-40`}>{option.label}{option.icon && <option.icon className={size === "sm" ? "size-3" : "size-4"} />}</button>)}
   </div>
@@ -1057,7 +1078,8 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     }
   }
   const toggleDeepScan = (enabled: boolean) => {
-    if (enabled) setDeepScanEditorOpen(true)
+    // Panel öffnet sich beim Einschalten und klappt beim Ausschalten wieder zu.
+    setDeepScanEditorOpen(enabled)
     void persistDeepScan({ deepScan: enabled, deepScanWeekday, deepScanHour })
   }
   const settingsSections = [
