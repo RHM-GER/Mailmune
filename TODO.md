@@ -174,7 +174,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Oranger Punkt am Benachrichtigungs-Icon in Nav verschwindet, wenn alle Benachrichtigungen archiviert sind (Archiv-State in App gehoben)
 - [x] Benachrichtigungsseite: Suche + Filter nach Benachrichtigungsart (Scans/Prüffälle/Wochenprüfung/Fehler/KI-Modell) im Tabellen-Stil
 - [x] Benachrichtigungs-Items: Checkbox statt Icon, Alle auswählen, Massen-Leiste „Archivieren (N)“ bzw. „Wiederherstellen (N)“ im Archiv; Listenstil beibehalten
-- [ ] Dashboard „Letzte Benachrichtigung": Link zur jeweiligen Benachrichtigung
+- [x] Dashboard „Letzte Benachrichtigungen": Einträge sind Links zur Benachrichtigungsseite (und zeigen echte statt Demo-Einträge)
 - [ ] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification)
 
 **Filter & Tabelle (Review)**
@@ -189,12 +189,12 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] „Spam markieren"-Popup: dritter Button „Kein Spam" zwischen Spam markieren und Abbrechen; bei >2 Segmenten kurze Trennlinien zwischen nicht ausgewählten Elementen (Tabellenzell-Design)
 - [ ] „Spam markieren"-Erscheinen (FloatingActions) seit Slide-Animation im Review-Bereich verzögert – bei Speichern/Abbrechen in Einstellungen nicht; Performance prüfen
 - [ ] Mail-Öffnen-Button funktioniert noch nicht
-- [ ] Refresh-Button soll auch „Neue Mails?"-Prüfung auslösen und den vorhandenen Scan-Toast anzeigen
+- [x] Refresh-Button löst zusätzlich eine inkrementelle „Neue Mails?“-Prüfung des aktiven Profils aus; der vorhandene Scan-Toast zeigt den Lauf
 
 **Einstellungen & KI-Modell**
 - [ ] Modellwechsel: Speichern/Abbrechen-Warndialog, wenn bereits ein validiertes Modell genutzt wurde (Fortschritt/Konsistenz der KI-Ergebnisse)
-- [ ] „Erneut validieren"-Button entfernen; Validierung in die KI-Modell-Settings verlegen
-- [ ] „Aktiv"-Badge beim KI-Modell nicht grün – keine Random-Farben; Farbe nur in Sonderfällen (z. B. Success-Toast)
+- [x] „Erneut validieren" zurücgebaut: nur noch dezenter Ghost-Button im KI-Modell-Bereich, wenn bereits validiert; „Fähigkeitstest“ bleibt prominent
+- [x] „Aktiv“-Badge beim KI-Modell neutral statt grün; auch „Automatik freigeschaltet“-Hinweis neutral – Farbe bleibt Sonderfällen (z. B. Success-Toast) vorbehalten
 - [x] Wochenprüfung: Settings-Panel klappt beim Ausschalten wieder ein
 - [ ] Lern-/Profiltransfer-Dialog: Export-Button (für anderen Rechner exportieren/weitergeben)
 - [ ] UI-Texte reduzieren: Erklärtexte in Tooltips/Dialoge verschieben, z. B. „Lokales Lernen aus bestätigten Reviews…", „Automatische Verschiebung – Noch keine bestätigten Entscheidungen…", „Ein KI-Ergebnis allein verschiebt niemals eine Mail…"
@@ -206,7 +206,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Floating-Action-Animation (floating-action-enter/exit) auch für andere Elemente erwägen: Nav-List-Items, Diagramm-Switcher (Tag/Monat) – generell Best Practice für Mikro-Animationen bedenken
 
 **Fenster & System**
-- [ ] Fenster-Icon: maximiert vs. Fenster-Modus unterscheiden (Windows-Standard: Doppelrahmen bei „Wiederherstellen")
+- [x] Fenster-Icon: maximiert zeigt Wiederherstellen-Doppelsymbol, Fenstermodus einfaches Quadrat (Windows-Standard, live per onResized)
 - [ ] Light Theme fehlt komplett (Dark ist Referenz): zentrale Farb-Tokens, dann alle Seiten/Dialoge/Tabellen/Charts/Tooltips/Toasts prüfen – große Aufgabe
 - [ ] Vor Production: Dev-Browser-Tools-Zugang entfernen (Rechtsklick/Inspect, Skript-Injection über Browser verhindern)
 

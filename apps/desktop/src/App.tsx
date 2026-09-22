@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -345,8 +345,8 @@ export default function App() {
           <div ref={mainScrollRef} className="h-full overflow-y-auto">
           {page === "settings" && <Header page={page} />}
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
-            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} />}
-            {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
+            {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} notifications={notificationItems.slice(0, 3)} onNotifications={() => setPage("notifications")} />}
+            {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} onCheckMail={() => { const id = activeAccountRef.current; if (id) void startScan(id, false).catch(() => {}) }} />}
             {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={notificationItems} archive={notificationArchive} onArchiveChange={setNotificationArchive} onReview={isTauri() ? () => setPage("review") : undefined} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} activeAccountId={activeId} />}
           </div>
@@ -470,13 +470,26 @@ function AccountSwitcher({ compact, accounts, activeAccountId, onSelectAccount, 
 }
 
 function WindowControls() {
-  if (!isTauri()) return null
+  const tauri = isTauri()
+  // Windows-Standard: maximiert zeigt das „Wiederherstellen“-Doppelsymbol,
+  // im Fenstermodus das einfache Quadrat.
+  const [maximized, setMaximized] = useState(false)
+  useEffect(() => {
+    if (!tauri) return
+    const win = getCurrentWindow()
+    let unlisten: (() => void) | undefined
+    let disposed = false
+    void win.isMaximized().then((value) => { if (!disposed) setMaximized(value) }).catch(() => {})
+    void win.onResized(() => { void win.isMaximized().then((value) => setMaximized(value)).catch(() => {}) }).then((stop) => { if (disposed) stop(); else unlisten = stop }).catch(() => {})
+    return () => { disposed = true; unlisten?.() }
+  }, [tauri])
+  if (!tauri) return null
   const win = getCurrentWindow()
   const base = "flex h-9 w-[46px] items-center justify-center text-[#c4c4c4] transition-colors hover:bg-white/[0.08] hover:text-white"
   return (
     <div className="absolute right-0 top-0 z-50 flex h-9 items-center">
       <button type="button" className={base} onClick={() => void win.minimize()} aria-label="Minimieren"><Minus className="size-4" /></button>
-      <button type="button" className={base} onClick={() => void win.toggleMaximize()} aria-label="Maximieren"><Square className="size-[11px]" /></button>
+      <button type="button" className={base} onClick={() => void win.toggleMaximize()} aria-label={maximized ? "Wiederherstellen" : "Maximieren"}>{maximized ? <Copy className="size-3.5" /> : <Square className="size-[11px]" />}</button>
       <button type="button" className={`${base} hover:bg-[#e81123] hover:text-white`} onClick={() => void win.close()} aria-label="Schließen"><X className="size-4" /></button>
     </div>
   )
@@ -490,7 +503,7 @@ function Header({ page }: { page: Page }) {
   </header>
 }
 
-function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean; dailyStats: DailyStat[] | null }) {
+function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats, notifications: recentNotifications, onNotifications }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean; dailyStats: DailyStat[] | null; notifications?: NotificationItem[]; onNotifications?: () => void }) {
   const [period, setPeriod] = useState("Woche")
   const [showInbox, setShowInbox] = useState(true)
   const [showFalsePositives, setShowFalsePositives] = useState(true)
@@ -509,7 +522,7 @@ function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats }: { 
     </div>
     <div data-section-id="dashboard-analysis" className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
       <Card className="relative min-w-0 border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader className="pr-[340px]"><div><CardTitle>Spam</CardTitle><CardDescription>Spam im Verhältnis zum normalen Eingang</CardDescription></div><div className="absolute right-6 top-6"><Segmented options={["Tag", "Woche", "Monat", "Jahr", "Gesamt"]} value={period} onChange={setPeriod} /></div></CardHeader><CardContent className="min-w-0 pt-2"><div className="mb-4 flex flex-wrap items-end justify-between gap-4"><div className="flex items-baseline gap-3"><span className="text-3xl font-medium text-[#ff6b2c]">{spamShare} %</span><span className="text-xs text-[#777]">Spam · {totals.spam.toLocaleString("de-DE")} Nachrichten</span></div><div className="flex flex-wrap gap-2 text-xs"><span className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[#ff6b2c]"><span className="size-2 rounded-full bg-[#ff6b2c]" />Spam</span><button onClick={() => setShowInbox((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showInbox ? "bg-white/[0.05] text-[#d6d6d6]" : "text-[#555]"}`}><span className={`size-2 rounded-full ${showInbox ? "bg-[#d6d6d6]" : "bg-[#555]"}`} />Eingang · {totals.inbox.toLocaleString("de-DE")}</button><button onClick={() => setShowFalsePositives((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showFalsePositives ? "bg-white/[0.05] text-[#858585]" : "text-[#4d4d4d]"}`}><span className={`size-2 rounded-full ${showFalsePositives ? "bg-[#858585]" : "bg-[#4d4d4d]"}`} />Fehlalarme · {totals.falsePositive.toLocaleString("de-DE")}</button></div></div><div className="h-[240px]"><ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 640, height: 240 }}><AreaChart data={activeChartData}><defs><linearGradient id="spamArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ff6b2c" stopOpacity={0.42} /><stop offset="95%" stopColor="#ff6b2c" stopOpacity={0.02} /></linearGradient><linearGradient id="inboxArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d6d6d6" stopOpacity={0.16} /><stop offset="95%" stopColor="#d6d6d6" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid vertical={false} stroke="rgba(255,255,255,.055)" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#777", fontSize: 12 }} /><YAxis axisLine={false} tickLine={false} tick={{ fill: "#666", fontSize: 11 }} width={34} domain={[0, "auto"]} /><ChartTooltip cursor={false} contentStyle={{ background: "#242424", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, fontSize: 12 }} />{showInbox && <Area type="monotone" dataKey="inbox" name="Eingang" fill="url(#inboxArea)" stroke="#d6d6d6" strokeWidth={1.5} dot={false} />}{showFalsePositives && <Area type="monotone" dataKey="falsePositive" name="Fehlalarme" fill="transparent" stroke="#858585" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />}<Area type="monotone" dataKey="spam" name="Spam" fill="url(#spamArea)" stroke="#ff6b2c" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#ff6b2c" }} /></AreaChart></ResponsiveContainer></div></CardContent></Card>
-      <Card className="border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader><CardTitle>Letzte Benachrichtigungen</CardTitle><CardDescription>Lokale Ereignisse und offene Aufgaben</CardDescription></CardHeader><CardContent className="divide-y divide-white/[0.06]">{notifications.map((item) => <div key={item.title} className="flex gap-3 py-4 first:pt-0"><div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05]">{item.action ? <BellDot className="size-4" /> : <Check className="size-4 text-[#999]" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs leading-5 text-[#888]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div></div>)}</CardContent></Card>
+      <Card className="border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader><CardTitle>Letzte Benachrichtigungen</CardTitle><CardDescription>Lokale Ereignisse und offene Aufgaben</CardDescription></CardHeader><CardContent className="divide-y divide-white/[0.06]">{(recentNotifications ?? notifications).map((item) => <button key={item.id} type="button" onClick={onNotifications} className="flex w-full gap-3 py-4 text-left first:pt-0 transition-opacity hover:opacity-80"><div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05]">{item.action ? <BellDot className="size-4" /> : <Check className="size-4 text-[#999]" />}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.title}</p><p className="mt-1 truncate text-xs leading-5 text-[#888]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div></button>)}</CardContent></Card>
     </div>
     <SectionIndicator items={[{ id: "dashboard-summary", label: "Kennzahlen" }, { id: "dashboard-analysis", label: "Analyse" }]} scrollRef={scrollRef} />
   </div>
@@ -637,7 +650,7 @@ function DualRangeSlider({ min, max, onChange }: { min: number; max: number; onC
   )
 }
 
-function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean }) {
+function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean; onCheckMail?: () => void }) {
   const tableScrollRef = useRef<HTMLDivElement>(null)
   const tableFade = useScrollFade(tableScrollRef)
   const tableHorizontalFade = useScrollFade(tableScrollRef, "horizontal")
@@ -702,7 +715,7 @@ function ReviewPage({ decisions, refresh, agentOnline }: { decisions: Decision[]
     </div>
     <div className="mt-12 flex min-h-0 flex-1 flex-col">
       <div className="relative shrink-0"><div ref={toolbarScrollRef} className="flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-gutter:stable]">
-        <ToolbarButton iconOnly onClick={() => void refresh()} aria-label="Daten aktualisieren"><RefreshCw className="size-4" /></ToolbarButton>
+        <ToolbarButton iconOnly onClick={() => { void refresh(); onCheckMail?.() }} aria-label="Daten aktualisieren und neue Mails prüfen"><RefreshCw className="size-4" /></ToolbarButton>
         <div className="relative h-[52px] w-[300px] min-w-[220px] shrink-0">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Durchsuchen" className="h-full rounded-md border-white/10 bg-white/[0.05] px-3.5 pr-11 text-sm placeholder:text-[#888]" />
           <Search className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-[#888]" />
@@ -1323,7 +1336,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         <p className="truncate text-sm font-medium">{validated ? account.ollamaModel : selected || "Kein Modell gewählt"}</p>
         <p className="mt-1 truncate text-xs text-[#666]">{validated ? "Ollama · lokal validiert" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · nicht verbunden"}</p>
       </div>
-      {validated && <Badge className="shrink-0 border-white/10 bg-white/[0.06] text-[#8ad08a]">aktiv</Badge>}
+      {validated && <Badge className="shrink-0 border-white/10 bg-white/[0.06] text-[#d6d6d6]">aktiv</Badge>}
     </div>
 
     {ollamaError && <p className="mt-3 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{ollamaError}</p>}
@@ -1342,7 +1355,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     </div>
 
     <div className="mt-3 flex flex-wrap gap-2">
-      <Button size="sm" onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
+      <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
     </div>
     {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
     <p className="mt-3 text-xs leading-5 text-[#666]">Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p>
@@ -1420,7 +1433,7 @@ function AutomationPanel({ account, refresh }: { account: Account; refresh: () =
       </div>
       <CompactOnOff enabled={!account.dryRun} label="Automatische Verschiebung" onChange={(enabled) => { if (enabled) setConfirmOpen(true); else void setAutomation(false) }} />
     </div>
-    {report?.autoMoveReady && <p className="mt-2 text-xs text-[#8ad08a]">Automatik freigeschaltet: Präzisionsziel von 99,5 % erreicht.</p>}
+    {report?.autoMoveReady && <p className="mt-2 text-xs text-[#aaa]">Automatik freigeschaltet: Präzisionsziel von 99,5 % erreicht.</p>}
     {busy && <p className="mt-2 text-xs text-[#888]">Wird gespeichert …</p>}
     {message && <p className="mt-2 text-xs leading-5 text-[#888]">{message}</p>}
     <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
