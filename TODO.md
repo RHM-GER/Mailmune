@@ -161,6 +161,54 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Accessibility, Tastatur, kleine Fenster, lange Texte, Fehler- und Leerezustände testen
 - [ ] Visuelle Endabnahme gegen relevante Figma-Nodes
 
+### P1 – Nutzer-Feedback-Backlog (ungeordnet, schnell erfasst)
+
+**Profile & Datentrennung**
+- [ ] Profile werden nicht getrennt betrachtet: Tabelle/Zuordnung sammelt alles – Daten müssen strikt je Profil getrennt sein; neues Profil hinzufügen wechselt sofort zu diesem und zeigt nur dessen Daten
+- [ ] Bug: Gelöschte Profile bleiben erhalten und erscheinen teilweise mehrfach
+- [ ] Mails gelöschter Profile sind in der (fälschlich gesammelten) Tabellen-Übersicht weiter sichtbar – mit Profiltrennung/Löschen beheben
+
+**Navigation & Benachrichtigungen**
+- [ ] Profil-Switcher in Nav: „Profil hinzufügen"-Button öffnet das Overlay nicht (defekt)
+- [ ] Oranger Punkt am Benachrichtigungs-Icon in Nav muss verschwinden, wenn alle Benachrichtigungen archiviert sind
+- [ ] Benachrichtigungsseite: Suche + Filter (Filterkriterium = Benachrichtigungsart) an gleicher Position/im gleichen Stil wie bei der Tabelle – componentbasiert wiederverwenden
+- [ ] Benachrichtigungs-Items: Checkbox statt Icon (Einzelauswahl + alle markieren + direkt archivieren); im Archiv umgekehrt (wiederherstellen). Listenstil behalten, keine Tabelle
+- [ ] Dashboard „Letzte Benachrichtigung": Link zur jeweiligen Benachrichtigung
+- [ ] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification)
+
+**Filter & Tabelle (Review)**
+- [ ] Score-Range-Slider an Einstellungen angleichen (1:1): gleiche Optik; Von/Bis-Zahlen unten links/rechts ganz außen; Thumb-Indikator exakt wie Settings-Slider (dort nur rechts, da Single-Thumb)
+- [ ] Score-Filter: Dialog beim Klick öffnen (wie Datum) statt Inline-Aufklappen; im Dialog oben links Beschriftung, oben rechts Prozent-Indikator (wie Einstellungen)
+- [ ] Einheitlicher Hover für Filter/Suche/Score/Refresh: nur leicht heller (wie Refresh), componentbasiert lösen
+- [ ] Datumsfilter: greift erst nach zweimal „Anwenden"; altes Datum bleibt nach Reset gespeichert (beides Bugs)
+- [ ] Filterzustand nicht rekursiv/persistent: Diagramm-Standard „Gesamt" und Filteränderungen je Ansicht dauerhaft speichern
+- [ ] Filter-Dropdowns: Best Practice prüfen – Optionen erschließen sich nicht ohne Durchklicken; gruppierte/labelte Darstellung erwägen
+- [ ] Filter-Zahlen (z. B. „Filter (88 Mails)", „Score 0–100%") einheitlich breit/fest, damit die Toolbar bei Änderung nicht horizontal verrutscht
+- [ ] Filter öffnen/schließen dauert etwas lange (Animation/Timing prüfen)
+- [ ] „Spam markieren"-Popup: dritter Button „Kein Spam" zwischen Spam markieren und Abbrechen; bei >2 Items Trennlinie zwischen nicht-aktiven Segmenten im Design der kleinen Tabellenzell-Trennlinien
+- [ ] „Spam markieren"-Erscheinen (FloatingActions) seit Slide-Animation im Review-Bereich verzögert – bei Speichern/Abbrechen in Einstellungen nicht; Performance prüfen
+- [ ] Mail-Öffnen-Button funktioniert noch nicht
+- [ ] Refresh-Button soll auch „Neue Mails?"-Prüfung auslösen und den vorhandenen Scan-Toast anzeigen
+
+**Einstellungen & KI-Modell**
+- [ ] Modellwechsel: Speichern/Abbrechen-Warndialog, wenn bereits ein validiertes Modell genutzt wurde (Fortschritt/Konsistenz der KI-Ergebnisse)
+- [ ] „Erneut validieren"-Button entfernen; Validierung in die KI-Modell-Settings verlegen
+- [ ] „Aktiv"-Badge beim KI-Modell nicht grün – keine Random-Farben; Farbe nur in Sonderfällen (z. B. Success-Toast)
+- [ ] Wochenprüfung: Settings-Panel klappt beim Ausschalten nicht wieder ein
+- [ ] Lern-/Profiltransfer-Dialog: Export-Button (für anderen Rechner exportieren/weitergeben)
+- [ ] UI-Texte reduzieren: Erklärtexte in Tooltips/Dialoge verschieben, z. B. „Lokales Lernen aus bestätigten Reviews…", „Automatische Verschiebung – Noch keine bestätigten Entscheidungen…", „Ein KI-Ergebnis allein verschiebt niemals eine Mail…"
+- [ ] Verbindungs-Aktionsbuttons (Verbindung testen/prüfen/neu) gehören in die Settings des Mailprofils
+- [ ] Automatischer-Verschiebung-Hinweis redundant zum Spamverhalten-Slider (Autonom) – entfernen/konsolidieren
+
+**Dashboard & Diagramm**
+- [ ] Neue Serie „Nicht erkannt": Mails, die händisch (externer Client) in den Spamordner gelegt wurden = vom Filter übersehener Spam; gegen Gesamteingang messen (Gegenstück zum Fehlalarm)
+- [ ] Floating-Action-Animation (floating-action-enter/exit) auch für andere Elemente erwägen: Nav-List-Items, Diagramm-Switcher (Tag/Monat) – generell Best Practice für Mikro-Animationen bedenken
+
+**Fenster & System**
+- [ ] Fenster-Icon: maximiert vs. Fenster-Modus unterscheiden (Windows-Standard: Doppelrahmen bei „Wiederherstellen")
+- [ ] Light Theme fehlt komplett (Dark ist Referenz): zentrale Farb-Tokens, dann alle Seiten/Dialoge/Tabellen/Charts/Tooltips/Toasts prüfen – große Aufgabe
+- [ ] Vor Production: Dev-Browser-Tools-Zugang entfernen (Rechtsklick/Inspect, Skript-Injection über Browser verhindern)
+
 ## Erledigt
 
 ### Technik
