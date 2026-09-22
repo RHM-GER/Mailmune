@@ -75,21 +75,29 @@ func (s *SQLite) PurgeReceivedLog(ctx context.Context) (int64, error) {
 // privacy-preserving received_log, so it is complete in normal operation;
 // decisions alone only contain candidates. Days scanned before received_log
 // existed are clamped so the invariant still holds.
-func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int) ([]domain.DailyStat, error) {
+func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int, accountID string) ([]domain.DailyStat, error) {
 	if days <= 0 || days > 3660 {
 		days = 30
 	}
 	since := time.Now().UTC().AddDate(0, 0, -days).Format(statsDay)
 	// received_at is RFC3339 UTC, so the first 10 chars are the YYYY-MM-DD day.
+	// accountID leer = alle Postfächer (Demo-/Gesamtansicht), sonst strikt nur
+	// das aktive Profil - Daten verschiedener Profile werden nie gemischt.
+	accountFilter := ""
+	args := []any{since, since}
+	if accountID != "" {
+		accountFilter = " AND account_id = ?"
+		args = []any{since, accountID, since, accountID}
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT day, MAX(received), 0, MAX(spam), MAX(rejected) FROM (
 SELECT received_day AS day, COUNT(*) AS received, 0 AS spam, 0 AS rejected
-FROM received_log WHERE received_day >= ? GROUP BY received_day
+FROM received_log WHERE received_day >= ?`+accountFilter+` GROUP BY received_day
 UNION ALL
 SELECT substr(received_at,1,10) AS day, COUNT(*) AS received,
 SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END) AS spam,
 SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected
-FROM decisions WHERE substr(received_at,1,10) >= ? GROUP BY substr(received_at,1,10)
-) GROUP BY day ORDER BY day ASC`, since, since)
+FROM decisions WHERE substr(received_at,1,10) >= ?`+accountFilter+` GROUP BY substr(received_at,1,10)
+) GROUP BY day ORDER BY day ASC`, args...)
 	if err != nil {
 		return nil, err
 	}

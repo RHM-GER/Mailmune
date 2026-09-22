@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, TriangleAlert, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, calibration, deleteAccount, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
@@ -199,6 +199,11 @@ export default function App() {
   const [summary, setSummary] = useState<Summary>(isTauri() ? emptySummary : demoSummary)
   const [decisions, setDecisions] = useState<Decision[]>(isTauri() ? [] : demoDecisions)
   const [accounts, setAccounts] = useState<Account[]>([])
+  // Aktives Profil: Tabelle, Dashboard und Einstellungen zeigen strikt nur
+  // die Daten dieses Postfachs - Profile werden niemals gemischt. Die Wahl
+  // bleibt über Neustarts erhalten; ein neues Postfach wird sofort aktiv.
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(() => localStorage.getItem("mailmune.activeAccountId"))
+  const activeAccountRef = useRef<string | null>(null)
   const [agentOnline, setAgentOnline] = useState(!isTauri())
   const [dailyStats, setDailyStats] = useState<DailyStat[] | null>(null)
   const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number } | null>(null)
@@ -215,15 +220,25 @@ export default function App() {
   const [compactNav, setCompactNav] = useState(false)
   const narrowApp = useMediaQuery("(max-width: 890px)")
   const effectiveCompactNav = narrowApp || compactNav
+  // Effektives aktives Konto: fällt auf das erste zurück, wenn die Wahl fehlt
+  // oder das Konto gelöscht wurde.
+  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0] ?? null
+  const activeId = activeAccount?.id ?? null
+  useEffect(() => {
+    activeAccountRef.current = activeId
+    if (activeId) localStorage.setItem("mailmune.activeAccountId", activeId)
+  }, [activeId])
 
   const refresh = async () => {
     if (!isTauri()) return
+    const accountId = activeAccountRef.current
+    const query = accountId ? `accountId=${encodeURIComponent(accountId)}` : ""
     try {
       const [nextSummary, nextDecisions, nextAccounts, nextStats] = await Promise.all([
-        agentRequest<Summary>("GET", "/v1/summary"),
-        agentRequest<Decision[]>("GET", "/v1/decisions?limit=250"),
+        agentRequest<Summary>("GET", `/v1/summary${query ? `?${query}` : ""}`),
+        agentRequest<Decision[]>("GET", `/v1/decisions?limit=250${query ? `&${query}` : ""}`),
         agentRequest<Account[]>("GET", "/v1/accounts"),
-        fetchStats(3660).catch(() => null),
+        fetchStats(3660, accountId).catch(() => null),
       ])
       setSummary(nextSummary)
       setDecisions(nextDecisions ?? [])
@@ -281,6 +296,9 @@ export default function App() {
     }
   }, [])
 
+  // Profilwechsel: alle Datenansichten sofort für das neue Postfach laden.
+  useEffect(() => { if (isTauri()) void refresh() }, [activeId])
+
   // Offene Prüffälle als echte, nachgeführte Benachrichtigung: ersetzt sich
   // selbst, sobald sich die Anzahl ändert, und verschwindet bei null nicht
   // spurlos – sie bleibt als erledigter Eintrag stehen.
@@ -302,7 +320,7 @@ export default function App() {
     <TooltipProvider>
       <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
         <WindowControls />
-        <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} />
+        <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} accounts={accounts} activeAccountId={activeId} onSelectAccount={setActiveAccountId} refresh={refresh} />
         <main className="relative min-w-0 flex-1 overflow-hidden">
           {/* Rahmenloses Fenster: dieser transparente Bereich oben ersetzt die
               native Titelleiste zum Ziehen; Doppelklick maximiert. Er liegt im
@@ -314,7 +332,7 @@ export default function App() {
             {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} />}
             {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
             {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={isTauri() ? agentNotifications.map(({ time, ...rest }) => ({ ...rest, time: formatNotificationTime(time) })) : notifications} onReview={isTauri() ? () => setPage("review") : undefined} />}
-            {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} />}
+            {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} activeAccountId={activeId} />}
           </div>
           </div>
           {page !== "review" && page !== "settings" && <ScrollFade strength={mainFade} targetRef={mainScrollRef} />}
@@ -383,7 +401,7 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
   </div>
 }
 
-function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending }: { page: Page; onPage: (page: Page) => void; compact: boolean; compactLocked: boolean; onCompact: () => void; pending: number }) {
+function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending, accounts, activeAccountId, onSelectAccount, refresh }: { page: Page; onPage: (page: Page) => void; compact: boolean; compactLocked: boolean; onCompact: () => void; pending: number; accounts: Account[]; activeAccountId: string | null; onSelectAccount: (id: string) => void; refresh: () => void }) {
   const primary = [{ id: "dashboard" as const, label: "Übersicht", icon: LayoutDashboard }, { id: "review" as const, label: "Zuordnung", icon: Table2 }]
   const secondary = [{ id: "notifications" as const, label: "Benachrichtigungen", icon: Bell }, { id: "settings" as const, label: "Einstellungen", icon: Settings }]
   return (
@@ -399,7 +417,7 @@ function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending }: {
         <nav className="flex flex-col gap-0">
           {secondary.map((item) => <NavItem key={item.id} {...item} active={page === item.id} compact={compact} onClick={() => onPage(item.id)} />)}
         </nav>
-        <AccountSwitcher compact={compact} />
+        <AccountSwitcher compact={compact} accounts={accounts} activeAccountId={activeAccountId} onSelectAccount={onSelectAccount} refresh={refresh} />
       </div>
     </aside>
   )
@@ -413,15 +431,25 @@ function NavItem({ id, label, icon: Icon, active, compact, onClick, badge }: { i
   return <Tooltip><TooltipTrigger render={button} /><TooltipContent side="right" sideOffset={10}>{label}</TooltipContent></Tooltip>
 }
 
-function AccountSwitcher({ compact }: { compact: boolean }) {
+function AccountSwitcher({ compact, accounts, activeAccountId, onSelectAccount, refresh }: { compact: boolean; accounts: Account[]; activeAccountId: string | null; onSelectAccount: (id: string) => void; refresh: () => void }) {
+  const [addOpen, setAddOpen] = useState(false)
+  const active = accounts.find((item) => item.id === activeAccountId) ?? accounts[0] ?? null
+  const initials = (name: string) => name.trim().slice(0, 2).toUpperCase() || "?"
   return <div className="mt-4">
     <DropdownMenu>
       <DropdownMenuTrigger render={<button aria-label="Postfach wechseln" className={`flex w-full items-center rounded-md border border-white/10 bg-white/[0.05] outline-none transition-colors hover:bg-white/[0.07] ${compact ? "h-11 justify-center p-1" : "h-[54px] gap-3 px-1.5 pr-3.5"}`} />}>
-        <span className={`flex shrink-0 items-center justify-center rounded-md border border-white/10 bg-[#ff4d00] text-xs font-medium text-black ${compact ? "size-[34px]" : "size-10"}`}>ST</span>
-        {!compact && <><span className="min-w-0 flex-1 truncate text-left text-sm text-[#a8a8a8]">kontakt@fliesenbetrieb.de</span><ChevronsUpDown className="size-4 text-[#777]" /></>}
+        <span className={`flex shrink-0 items-center justify-center rounded-md border border-white/10 bg-[#ff4d00] text-xs font-medium text-black ${compact ? "size-[34px]" : "size-10"}`}>{active ? initials(active.name) : <Plus className="size-4" />}</span>
+        {!compact && <><span className="min-w-0 flex-1 truncate text-left text-sm text-[#a8a8a8]">{active ? active.username : "Postfach verbinden"}</span><ChevronsUpDown className="size-4 text-[#777]" /></>}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side={compact ? "right" : "top"} align="start" className="min-w-[250px]"><DropdownMenuItem><span className="mr-2 flex size-7 items-center justify-center rounded bg-[#ff4d00] text-[10px] text-black">ST</span>STRATO Postfach</DropdownMenuItem><DropdownMenuItem><Plus />Postfach hinzufügen</DropdownMenuItem></DropdownMenuContent>
+      <DropdownMenuContent side={compact ? "right" : "top"} align="start" className="min-w-[250px]">
+        {accounts.map((account) => <DropdownMenuItem key={account.id} onClick={() => onSelectAccount(account.id)} className="justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2"><span className="flex size-7 shrink-0 items-center justify-center rounded bg-[#ff4d00] text-[10px] text-black">{initials(account.name)}</span><span className="truncate">{account.name}</span></span>
+          {active && account.id === active.id && <Check className="size-4 shrink-0" />}
+        </DropdownMenuItem>)}
+        <DropdownMenuItem onClick={() => setAddOpen(true)}><Plus />Postfach hinzufügen</DropdownMenuItem>
+      </DropdownMenuContent>
     </DropdownMenu>
+    <AddAccount refresh={refresh} open={addOpen} onOpenChange={setAddOpen} onCreated={onSelectAccount} hideTrigger />
   </div>
 }
 
@@ -883,7 +911,7 @@ function Notifications({ scrollRef, items = notifications, onReview }: { scrollR
   </div>
 }
 
-function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () => void }) {
+function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Account[]; refresh: () => void; activeAccountId: string | null }) {
   const settingsScrollRef = useRef<HTMLDivElement>(null)
   const settingsFade = useScrollFade(settingsScrollRef)
   const { theme, setTheme } = useTheme()
@@ -894,15 +922,14 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [notificationThreshold, setNotificationThreshold] = useState(() => Number(readStoredValue("mailmune.notificationThreshold", "spamalytic.notificationThreshold", "90")))
   const [automaticThreshold, setAutomaticThreshold] = useState(() => Number(readStoredValue("mailmune.automaticSpamThreshold.v2", "spamalytic.automaticSpamThreshold.v2", "90")))
   const [accountStatus, setAccountStatus] = useState<Record<string, string>>({})
-  const [hiddenAccounts, setHiddenAccounts] = useState<string[]>([])
   const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
   const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
-  // Aktives Konto: das erste nicht ausgeblendete, sonst das erste überhaupt.
-  const activeAccount = accounts.find((item) => !hiddenAccounts.includes(item.id)) ?? accounts[0]
+  // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
+  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
   // gelesen. Konten laden aber asynchron und werden nach dem Speichern
   // aktualisiert; ohne diese Synchronisierung zeigt die UI weiter den
@@ -1018,13 +1045,13 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
       </ConnectionCard><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={setIncomingReviewEnabled} onSettings={() => {}} /></div></div>
     </section>
     <section className="min-w-0 space-y-6">
-      <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.filter((account) => !hiddenAccounts.includes(account.id)).length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>
-        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}<AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
+      <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>
+        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}<AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
-        {accounts.filter((account) => !hiddenAccounts.includes(account.id)).length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
+        {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
       <div data-section-id="settings-model"><ConnectionSection title="KI-Modelle" tooltip="Lokale KI-Modelle werden über Ollama verbunden. Sie bleiben auf diesem Gerät und können nach einem Fähigkeitstest für unklare E-Mails eingesetzt werden." count={accounts.filter((item) => item.ollamaValidated).length} add={<span />}>
-        <ModelManager accounts={accounts} refresh={refresh} />
+        <ModelManager accounts={activeAccount ? [activeAccount] : []} refresh={refresh} />
       </ConnectionSection></div>
       <div data-section-id="settings-security" className="flex gap-3 border-t border-white/[0.09] pt-6"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#999]" /><div><p className="text-sm font-medium">Sicherheit</p><p className="mt-1 text-xs leading-5 text-[#777]">Passwörter liegen im Betriebssystem-Schlüsselbund. Nachrichtentexte werden nicht dauerhaft gespeichert.</p></div></div>
     </section>
@@ -1032,7 +1059,7 @@ function SettingsPage({ accounts, refresh }: { accounts: Account[]; refresh: () 
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
     <SectionIndicator items={settingsSections} scrollRef={settingsScrollRef} />
     <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { setFolderName(folderDraft.trim()); setEditingFolder(false) }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
-    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; if (deleteTarget.id === "demo-strato") setFakeAccountVisible(false); else setHiddenAccounts((current) => [...current, deleteTarget.id]); setDeleteTarget(null) }} onCancel={() => setDeleteTarget(null)} />
+    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch { /* Ohne Agent bleibt der Eintrag erhalten */ } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
   </div>
 }
 
@@ -1235,7 +1262,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
 
     <div className="mt-3 space-y-2">
       <Label htmlFor="model-select">Modell wählen</Label>
-      <Select value={selected} onValueChange={(value) => void choose(value)} disabled={busy}>
+      <Select value={selected} onValueChange={(value) => { if (value) void choose(value) }} disabled={busy}>
         <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
           <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
         </SelectTrigger>
@@ -1337,8 +1364,10 @@ function AutomationPanel({ account, refresh }: { account: Account; refresh: () =
   </div>
 }
 
-function AddAccount({ refresh }: { refresh: () => void }) {
-  const [open, setOpen] = useState(false)
+function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hideTrigger }: { refresh: () => void; onCreated?: (id: string) => void; open?: boolean; onOpenChange?: (open: boolean) => void; hideTrigger?: boolean }) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen: (value: boolean) => void = onOpenChange ?? setInternalOpen
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -1347,8 +1376,8 @@ function AddAccount({ refresh }: { refresh: () => void }) {
   const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "" })
   const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); try { await agentRequest("POST", "/v1/accounts", { account: { id: crypto.randomUUID(), name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: [form.purpose, form.context].filter(Boolean).join(" · "), industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh() } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
-  return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}><DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} /><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
+  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: [form.purpose, form.context].filter(Boolean).join(" · "), industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
+  return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}
     {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field></div>}

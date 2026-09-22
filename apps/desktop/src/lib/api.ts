@@ -119,12 +119,16 @@ export function scanRuns(accountId: string): Promise<ScanRun[]> {
   return agentRequest<ScanRun[]>("GET", `/v1/accounts/${accountId}/scans`)
 }
 
-export function summary(): Promise<Summary> {
-  return agentRequest<Summary>("GET", "/v1/summary")
+export function summary(accountId?: string | null): Promise<Summary> {
+  return agentRequest<Summary>("GET", `/v1/summary${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`)
 }
 
-export function decisions(limit = 250): Promise<Decision[]> {
-  return agentRequest<Decision[]>("GET", `/v1/decisions?limit=${limit}`)
+export function deleteAccount(accountId: string): Promise<{ ok: boolean }> {
+  return agentRequest<{ ok: boolean }>("DELETE", `/v1/accounts/${encodeURIComponent(accountId)}`)
+}
+
+export function decisions(limit = 250, accountId?: string | null): Promise<Decision[]> {
+  return agentRequest<Decision[]>("GET", `/v1/decisions?limit=${limit}${accountId ? `&accountId=${encodeURIComponent(accountId)}` : ""}`)
 }
 
 export function accounts(): Promise<Account[]> {
@@ -210,8 +214,8 @@ export interface DailyStat {
   rejected: number
 }
 
-export function stats(days = 400): Promise<DailyStat[]> {
-  return agentRequest<DailyStat[]>("GET", `/v1/stats?days=${days}`)
+export function stats(days = 400, accountId?: string | null): Promise<DailyStat[]> {
+  return agentRequest<DailyStat[]>("GET", `/v1/stats?days=${days}${accountId ? `&accountId=${encodeURIComponent(accountId)}` : ""}`)
 }
 
 /**
@@ -232,6 +236,7 @@ export const emptySummary: Summary = {
   rejected: 0,
   falsePositiveRate: 0,
   processedWeek: 0,
+  scanned: 0,
 }
 
 /**
@@ -246,6 +251,7 @@ export const demoSummary: Summary = {
   rejected: 2,
   falsePositiveRate: 0.026,
   processedWeek: 438,
+  scanned: 1284,
 }
 
 export const demoDecisions: Decision[] = [

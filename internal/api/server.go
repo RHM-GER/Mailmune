@@ -44,6 +44,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("GET /v1/stats", s.stats)
 	mux.HandleFunc("GET /v1/accounts", s.accounts)
 	mux.HandleFunc("POST /v1/accounts", s.saveAccount)
+	mux.HandleFunc("DELETE /v1/accounts/{id}", s.deleteAccount)
 	mux.HandleFunc("POST /v1/accounts/{id}/test", s.testAccount)
 	// /scan stays as a compatibility alias for starting a background run.
 	mux.HandleFunc("POST /v1/accounts/{id}/scan", s.startScan)
@@ -101,13 +102,20 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": "0.2.0"})
 }
 func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
-	value, err := s.service.Summary(r.Context())
+	value, err := s.service.Summary(r.Context(), r.URL.Query().Get("accountId"))
 	respond(w, "summary_failed", value, err)
 }
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	value, err := s.service.Stats(r.Context(), days)
+	value, err := s.service.Stats(r.Context(), days, r.URL.Query().Get("accountId"))
 	respond(w, "stats_failed", value, err)
+}
+
+// deleteAccount removes a mailbox profile and its local data. Messages on the
+// IMAP server are never touched (no-delete guarantee).
+func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	err := s.service.DeleteAccount(r.Context(), r.PathValue("id"))
+	respond(w, "account_delete_failed", map[string]bool{"ok": err == nil}, err)
 }
 func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.Accounts(r.Context())

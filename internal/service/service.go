@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -124,6 +125,16 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 		// Product rule: new mailboxes always begin in a reading dry run.
 		// Automation requires an explicit later change plus confirmation.
 		a.DryRun = true
+		// The same mailbox (host + username) must never be connected twice:
+		// duplicate profiles split reviews and learning, and they show up as
+		// "undeletable" doubles in the UI.
+		if existing, listErr := s.store.ListAccounts(ctx); listErr == nil {
+			for _, other := range existing {
+				if strings.EqualFold(strings.TrimSpace(other.Host), strings.TrimSpace(a.Host)) && strings.EqualFold(strings.TrimSpace(other.Username), strings.TrimSpace(a.Username)) {
+					return a, errors.New("this mailbox is already connected")
+				}
+			}
+		}
 	}
 	a.UpdatedAt = now
 	if a.Port == 0 {
@@ -211,6 +222,30 @@ func (s *Service) accountExists(ctx context.Context, id string) bool {
 	}
 	_, err := s.store.Account(ctx, id)
 	return err == nil
+}
+
+// DeleteAccount removes a mailbox profile and all derived local data
+// (decisions, learning data, scan runs, counters). This never touches the
+// IMAP mailbox: all messages stay untouched on the server. A running scan is
+// cancelled first so it cannot write into deleted rows; the stored password
+// is removed from the OS keyring.
+func (s *Service) DeleteAccount(ctx context.Context, id string) error {
+	account, err := s.store.Account(ctx, id)
+	if err != nil {
+		return err
+	}
+	if _, active, cancelErr := s.scanner.CancelScan(ctx, id); cancelErr == nil && active {
+		s.scanner.Wait(id, 5*time.Second)
+	}
+	if err := s.store.DeleteAccount(ctx, id); err != nil {
+		return err
+	}
+	// Best effort: a missing or locked keyring entry must not fail the delete.
+	_ = s.secrets.Delete(account.SecretRef)
+	if s.hub != nil {
+		s.hub.Publish("account.deleted", map[string]string{"id": id})
+	}
+	return nil
 }
 
 func (s *Service) TestAccount(ctx context.Context, id string) (mailbox.ConnectionInfo, error) {
@@ -368,15 +403,19 @@ func (s *Service) trainFromReview(ctx context.Context, request domain.ReviewRequ
 	}
 }
 
-func (s *Service) Summary(ctx context.Context) (domain.DashboardSummary, error) {
-	return s.store.Summary(ctx)
+// Summary returns the dashboard summary. accountID leer = global, sonst nur
+// das aktive Profil (Profile werden niemals gemischt).
+func (s *Service) Summary(ctx context.Context, accountID string) (domain.DashboardSummary, error) {
+	return s.store.Summary(ctx, accountID)
 }
 
 // Stats returns the aggregated daily activity series for the dashboard.
-func (s *Service) Stats(ctx context.Context, days int) ([]domain.DailyStat, error) {
+// Stats returns per-received-day aggregates. accountID leer = global, sonst
+// nur das aktive Profil.
+func (s *Service) Stats(ctx context.Context, days int, accountID string) ([]domain.DailyStat, error) {
 	// Aggregate by the mail's received date so the dashboard timeline reflects
 	// when messages actually arrived, not when Mailmune scanned or reviewed them.
-	return s.store.StatsByReceivedDay(ctx, days)
+	return s.store.StatsByReceivedDay(ctx, days, accountID)
 }
 
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }

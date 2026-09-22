@@ -45,7 +45,7 @@ func TestProductionModeCountsArrivalsWithoutStoringHams(t *testing.T) {
 	}
 
 	// The arrival series still counts both messages on their received day.
-	series, err := svc.Stats(ctx, 7)
+	series, err := svc.Stats(ctx, 7, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestProductionModeCountsArrivalsWithoutStoringHams(t *testing.T) {
 	if rescan := waitForScan(t, svc, account.ID); rescan.Status != domain.ScanCompleted {
 		t.Fatalf("rescan: %s (%s)", rescan.Status, rescan.Error)
 	}
-	series2, err := svc.Stats(ctx, 7)
+	series2, err := svc.Stats(ctx, 7, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -102,6 +102,31 @@ func (s *SQLite) Account(ctx context.Context, id string) (domain.AccountConfig, 
 	return domain.AccountConfig{}, sql.ErrNoRows
 }
 
+// DeleteAccount removes an account profile and all of its derived local data:
+// decisions (with their features), scan runs, folder sync states, learning
+// data, move operations and arrival counters cascade via foreign keys;
+// daily_stats has no foreign key and is cleared explicitly. The IMAP mailbox
+// itself is never touched - all messages stay on the server (no-delete
+// guarantee). Returns sql.ErrNoRows when the account does not exist.
+func (s *SQLite) DeleteAccount(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "DELETE FROM accounts WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return sql.ErrNoRows
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM daily_stats WHERE account_id=?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SaveDecision stores a decision idempotently. Deduplication happens on
 // (account, uidValidity, uid, originFolder): when a decision for the same
 // message already exists (e.g. after a resync), nothing is inserted and the
@@ -326,12 +351,23 @@ func (s *SQLite) ApplyReview(ctx context.Context, req domain.ReviewRequest) erro
 	return tx.Commit()
 }
 
-func (s *SQLite) Summary(ctx context.Context) (domain.DashboardSummary, error) {
+func (s *SQLite) Summary(ctx context.Context, accountID string) (domain.DashboardSummary, error) {
 	var out domain.DashboardSummary
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM accounts").Scan(&out.Accounts); err != nil {
 		return out, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT status,COUNT(*) FROM decisions GROUP BY status")
+	// accountID leer = globale Übersicht, sonst strikt das aktive Profil.
+	decisionQuery := "SELECT status,COUNT(*) FROM decisions"
+	weekQuery := "SELECT COUNT(*) FROM decisions WHERE created_at>=?"
+	arrivalQuery := "SELECT COUNT(*) FROM received_log"
+	args := []any{}
+	if accountID != "" {
+		decisionQuery += " WHERE account_id=?"
+		weekQuery += " AND account_id=?"
+		arrivalQuery += " WHERE account_id=?"
+		args = append(args, accountID)
+	}
+	rows, err := s.db.QueryContext(ctx, decisionQuery+" GROUP BY status", args...)
 	if err != nil {
 		return out, err
 	}
@@ -355,13 +391,14 @@ func (s *SQLite) Summary(ctx context.Context) (domain.DashboardSummary, error) {
 		}
 	}
 	since := formatTime(time.Now().AddDate(0, 0, -7))
-	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM decisions WHERE created_at>=?", since).Scan(&out.ProcessedWeek)
+	weekArgs := append([]any{since}, args...)
+	_ = s.db.QueryRowContext(ctx, weekQuery, weekArgs...).Scan(&out.ProcessedWeek)
 	// "Scanned" is every unique message ever seen. The arrival log counts all
 	// of them (including below-threshold mail that is not stored as a
 	// decision); the decision count is the fallback for installations from
 	// before the log existed. Take whichever is larger.
 	var arrivals int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM received_log").Scan(&arrivals); err == nil && arrivals > out.Scanned {
+	if err := s.db.QueryRowContext(ctx, arrivalQuery, args...).Scan(&arrivals); err == nil && arrivals > out.Scanned {
 		out.Scanned = arrivals
 	}
 	denominator := out.Confirmed + out.Rejected

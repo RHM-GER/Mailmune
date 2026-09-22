@@ -164,9 +164,10 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 ### P1 – Nutzer-Feedback-Backlog (ungeordnet, schnell erfasst)
 
 **Profile & Datentrennung**
-- [ ] Profile werden nicht getrennt betrachtet: Tabelle/Zuordnung sammelt alles – Daten müssen strikt je Profil getrennt sein; neues Profil hinzufügen wechselt sofort zu diesem und zeigt nur dessen Daten
-- [ ] Bug: Gelöschte Profile bleiben erhalten und erscheinen teilweise mehrfach
-- [ ] Mails gelöschter Profile sind in der (fälschlich gesammelten) Tabellen-Übersicht weiter sichtbar – mit Profiltrennung/Löschen beheben
+- [x] Profile werden getrennt betrachtet: Tabelle/Dashboard/Einstellungen zeigen strikt nur das aktive Profil (accountId-Filter für Summary/Stats/Decisions); Profilwahl persistiert; neues Postfach wird sofort aktiv; echter Account-Switcher in der Nav statt Demo
+- [x] Bug: Gelöschte Profile bleiben erhalten und erscheinen teilweise mehrfach – echtes DELETE /v1/accounts/{id} mit Kaskade (Entscheidungen, Lern­daten, Scans, Arrival-Log, Daily-Stats, Keyring-Passwort) statt UI-Hack; Duplikat-Schutz: gleiches Postfach (Host+Username) kann nicht zweimal verbunden werden
+- [x] Mails gelöschter Profile sind in der Tabellen-Übersicht weiter sichtbar – mit Profiltrennung + echter Löschung behoben
+- [ ] Verifizierung ausstehend (Terminal defekt): go test ./... + pnpm typecheck nach Windows-Neustart nachholen
 
 **Navigation & Benachrichtigungen**
 - [ ] Profil-Switcher in Nav: „Profil hinzufügen"-Button öffnet das Overlay nicht (defekt)

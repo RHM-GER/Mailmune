@@ -103,7 +103,7 @@ func TestStatsByReceivedDayGroupsByReceivedDate(t *testing.T) {
 	// day2: one confirmed spam.
 	save("d4", 4, day2, 0.95, domain.StatusConfirmed)
 
-	series, err := store.StatsByReceivedDay(ctx, 3660)
+	series, err := store.StatsByReceivedDay(ctx, 3660, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestReceivedLogCountsArrivalsOnceAndFeedsStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	series, err := store.StatsByReceivedDay(ctx, 30)
+	series, err := store.StatsByReceivedDay(ctx, 30, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestReceivedLogCountsArrivalsOnceAndFeedsStats(t *testing.T) {
 
 	// The summary's Scanned prefers the arrival log when it is larger than the
 	// decision count (production mode stores candidates only).
-	summary, err := store.Summary(ctx)
+	summary, err := store.Summary(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
