@@ -124,7 +124,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Aktive Nicht-Standardfilter vollständig invertiert weiß hervorheben
 - [x] Filtericon bei Abweichungen in Reseticon wechseln; Icon setzt nur aktive Filter zurück
 - [x] Status/Score sowie Betreff/Datum in Header und Tabelleninhalt tauschen
-- [ ] Nachrichtendetails mit vollständigen Reason-Codes ergänzen
+- [x] Nachrichtendetails mit vollständigen Reason-Codes ergänzt (Details-Dialog in der Zuordnung)
 - [ ] Such-, Filter- und Tabellenzustand je Postfach persistent speichern
 
 ### P1 – Section-Indicator
@@ -180,15 +180,15 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 **Filter & Tabelle (Review)**
 - [ ] Score-Range-Slider an Einstellungen angleichen (1:1): gleiche Optik; Von/Bis-Zahlen unten links/rechts ganz außen; Thumb-Indikator exakt wie Settings-Slider (dort nur rechts, da Single-Thumb)
 - [ ] Score-Filter: Dialog beim Klick öffnen (wie Datum) statt Inline-Aufklappen; im Dialog oben links Beschriftung, oben rechts Prozent-Indikator (wie Einstellungen)
-- [ ] Einheitlicher Hover für Filter/Suche/Score/Refresh: nur leicht heller (wie Refresh), componentbasiert lösen
-- [ ] Datumsfilter: greift erst nach zweimal „Anwenden"; altes Datum bleibt nach Reset gespeichert (beides Bugs)
-- [ ] Filterzustand nicht rekursiv/persistent: Diagramm-Standard „Gesamt" und Filteränderungen je Ansicht dauerhaft speichern
+- [x] Einheitlicher Hover für Filter/Score/Refresh: nur leicht heller (hover:bg-white/[0.08]), Search bleibt Input-Fokus-Stil
+- [x] Datumsfilter: greift jetzt sofort nach einmal „Anwenden“ (Close-Handler setzte den frischen Zeitraum zurück); Reset löscht auch das gespeicherte alte Datum
+- [x] Filterzustand persistent: Diagramm-Zeitraum standardmäßig „Gesamt“ und gespeichert; Review-Filter/Zeitraum/Score were bereits je Ansicht persistiert
 - [ ] Filter-Dropdowns: Best Practice prüfen – Optionen erschließen sich nicht ohne Durchklicken; gruppierte/labelte Darstellung erwägen
-- [ ] Filter-Zahlen (z. B. „Filter (88 Mails)", „Score 0–100%") einheitlich breit/fest, damit die Toolbar bei Änderung nicht horizontal verrutscht
+- [x] Filter-Zahlen („Filter (N Mails)“, „Score 0–100%“) mit fester Mindestbreite + tabular-nums – Toolbar verrutscht nicht mehr
 - [ ] Filter öffnen/schließen dauert etwas lange (Animation/Timing prüfen)
 - [x] „Spam markieren"-Popup: dritter Button „Kein Spam" zwischen Spam markieren und Abbrechen; bei >2 Segmenten kurze Trennlinien zwischen nicht ausgewählten Elementen (Tabellenzell-Design)
-- [ ] „Spam markieren"-Erscheinen (FloatingActions) seit Slide-Animation im Review-Bereich verzögert – bei Speichern/Abbrechen in Einstellungen nicht; Performance prüfen
-- [ ] Mail-Öffnen-Button funktioniert noch nicht
+- [x] „Spam markieren“-Erscheinen beschleunigt: Auswahlprüfung pro Zeile jetzt O(1) via Set statt O(n) includes
+- [x] Mail-Öffnen-Button: zeigt jetzt Nachrichtendetails (Score, vollständige Reason-Codes mit Evidence-Code + Gewicht, Ordner, Datum) statt leerem mailto – Rohtexte bleiben aus Datenschutzgründen ungespeichert
 - [x] Refresh-Button löst zusätzlich eine inkrementelle „Neue Mails?“-Prüfung des aktiven Profils aus; der vorhandene Scan-Toast zeigt den Lauf
 
 **Einstellungen & KI-Modell**

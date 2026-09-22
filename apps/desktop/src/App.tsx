@@ -66,15 +66,7 @@ function spamCategory(decision: Decision) {
   return "Verdächtiger Inhalt"
 }
 
-async function openDefaultMailClient() {
-  if (isTauri()) {
-    const { open } = await import("@tauri-apps/plugin-shell")
-    await open("mailto:")
-    return
-  }
-  window.location.href = "mailto:"
-}
-
+// Date helpers for the custom range picker (plain JS, no extra dependency).
 const chartDataByPeriod: Record<string, Array<{ label: string; spam: number; inbox: number; falsePositive: number }>> = {
   Tag: ["00", "04", "08", "12", "16", "20"].map((label, index) => ({ label, spam: [1, 0, 3, 5, 4, 2][index], inbox: [5, 3, 18, 27, 24, 14][index], falsePositive: [0, 0, 0, 1, 0, 0][index] })),
   Woche: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((label, index) => ({ label, spam: [8, 17, 11, 23, 14, 6, 7][index], inbox: [54, 68, 61, 77, 70, 39, 31][index], falsePositive: [0, 1, 0, 1, 0, 0, 0][index] })),
@@ -504,7 +496,8 @@ function Header({ page }: { page: Page }) {
 }
 
 function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats, notifications: recentNotifications, onNotifications }: { summary: Summary; onReview: () => void; scrollRef: React.RefObject<HTMLElement | null>; agentOnline: boolean; dailyStats: DailyStat[] | null; notifications?: NotificationItem[]; onNotifications?: () => void }) {
-  const [period, setPeriod] = useState("Woche")
+  const [period, setPeriod] = useState(() => readStoredValue("mailmune.dashboardPeriod", "spamalytic.dashboardPeriod", "Gesamt"))
+  useEffect(() => { localStorage.setItem("mailmune.dashboardPeriod", period) }, [period])
   const [showInbox, setShowInbox] = useState(true)
   const [showFalsePositives, setShowFalsePositives] = useState(true)
   // Echte Agent-Daten in der Desktop-App; Demo-Daten nur in der Browser-Vorschau.
@@ -668,6 +661,10 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
     try { const raw = localStorage.getItem("mailmune.reviewCustomRange"); return raw ? (JSON.parse(raw) as { from: string; to: string }) : null } catch { return null }
   })
   const [customOpen, setCustomOpen] = useState(false)
+  // Merker: „Anwenden“ im Kalender schließt den Dialog selbst – der
+  // Close-Handler darf den frischen Zeitraum nicht sofort zurücksetzen
+  // (Bug: Filter griff erst nach zweimaligem Anwenden).
+  const customApplied = useRef(false)
   const [scoreRange, setScoreRange] = useState<{ min: number; max: number }>(() => {
     try { const raw = localStorage.getItem("mailmune.reviewScoreRange"); return raw ? (JSON.parse(raw) as { min: number; max: number }) : { min: 0, max: 100 } } catch { return { min: 0, max: 100 } }
   })
@@ -682,9 +679,9 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
   useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
   useEffect(() => { localStorage.setItem("mailmune.reviewFilter", reviewFilter) }, [reviewFilter])
   useEffect(() => { localStorage.setItem("mailmune.reviewRange.v2", range) }, [range])
-  useEffect(() => { if (customRange) localStorage.setItem("mailmune.reviewCustomRange", JSON.stringify(customRange)) }, [customRange])
+  useEffect(() => { localStorage.setItem("mailmune.reviewCustomRange", JSON.stringify(customRange)) }, [customRange])
   useEffect(() => { localStorage.setItem("mailmune.reviewScoreRange", JSON.stringify(scoreRange)) }, [scoreRange])
-  const resetFilters = () => { setRange("all"); setReviewFilter("review"); setScoreRange({ min: 0, max: 100 }); setSelected([]) }
+  const resetFilters = () => { setRange("all"); setReviewFilter("review"); setScoreRange({ min: 0, max: 100 }); setCustomRange(null); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
     const customFrom = range === "custom" && customRange ? new Date(customRange.from + "T00:00:00").getTime() : null
@@ -702,6 +699,10 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
       if (!sort.direction) return 0; const left = sort.key === "category" ? spamCategory(a) : a[sort.key]; const right = sort.key === "category" ? spamCategory(b) : b[sort.key]; const result = typeof left === "number" ? left - Number(right) : String(left).localeCompare(String(right), "de"); return sort.direction === "asc" ? result : -result
     })
   }, [decisions, view, reviewFilter, range, customRange, scoreRange, query, sort, referenceTime])
+  // Auswahl als Set: O(1) statt O(n) pro Zeile, damit Auswahlwechsel die
+  // Sammelaktions-Leiste ohne spürbare Verzögerung erscheinen lassen.
+  const selectedSet = useMemo(() => new Set(selected), [selected])
+  const [details, setDetails] = useState<Decision | null>(null)
   const toggleAll = () => setSelected(selected.length === filtered.length ? [] : filtered.map((item) => item.id))
   const changeView = (nextView: "review" | "spam") => { setSelected([]); setView(nextView) }
   const review = async (action: "confirm" | "reject") => {
@@ -724,9 +725,29 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
           <FilterToolbarButton active={filtersActive} open={filterOpen} count={filtered.length} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
-          {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen((open) => !open)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:border-white/20 hover:text-white"}`}><Gauge className="size-4" />Score<span className="font-mono text-xs opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
+          {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen((open) => !open)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:bg-white/[0.08] hover:text-white"}`}><Gauge className="size-4" />Score<span className="inline-block min-w-[64px] font-mono text-xs tabular-nums opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
           {range === "custom" && <button onClick={() => setCustomOpen(true)} className="ml-2 flex h-[52px] shrink-0 items-center gap-2 rounded-md border border-white! bg-white! px-3.5 text-sm text-[#171717]! transition-colors hover:bg-white/90"><CalendarDays className="size-4" />{customRange ? `${formatShortDate(customRange.from)} – ${formatShortDate(customRange.to)}` : "Zeitraum wählen"}</button>}
-          <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next && !customRange && range === "custom") setRange("all") }} initial={customRange} onApply={(picked) => { setCustomRange(picked); setRange("custom"); setSelected([]) }} />
+          <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next) { if (customApplied.current) { customApplied.current = false; return } if (!customRange && range === "custom") setRange("all") } }} initial={customRange} onApply={(picked) => { customApplied.current = true; setCustomRange(picked); setRange("custom"); setSelected([]) }} />
+          {/* Nachrichtendetails: vollständige Reason-Codes der Entscheidung.
+              Rohe Mailtexte werden aus Datenschutzgründen nicht gespeichert. */}
+          <Dialog open={Boolean(details)} onOpenChange={(open) => { if (!open) setDetails(null) }}>
+            <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]">
+              <DialogHeader><DialogTitle className="break-words pr-8">{details?.subject || "(ohne Betreff)"}</DialogTitle><DialogDescription>{details?.from}{details ? ` · ${new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(details.receivedAt))} · ${details.currentFolder}` : ""}</DialogDescription></DialogHeader>
+              {details && <div className="space-y-3 py-1">
+                <div className="flex items-center justify-between rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-sm"><span className="text-[#888]">Score</span><span className="font-mono" style={{ color: scoreColor(details.score) }}>{Math.round(details.score * 100)} %</span></div>
+                <div className="space-y-1.5">
+                  {details.evidence.length === 0 && <p className="rounded-[10px] border border-white/[0.08] px-3 py-2 text-xs text-[#666]">Keine Auffälligkeiten – unter allen Schwellen.</p>}
+                  {details.evidence.map((entry, index) => <div key={index} className="flex items-start gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs">
+                    <span className="mt-px shrink-0 rounded-[4px] border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-[#888]">{entry.code}</span>
+                    <span className="min-w-0 flex-1 leading-5 text-[#bbb]">{entry.summary}</span>
+                    <span className="shrink-0 font-mono text-[#888]">{entry.weight > 0 ? "+" : ""}{entry.weight.toFixed(2)}</span>
+                  </div>)}
+                </div>
+                <p className="text-[11px] leading-4 text-[#666]">Aus Datenschutzgründen speichert Mailmune keine Nachrichtentexte. Die Einordnung basiert auf Metadaten und begrenzten Textmerkmalen zum Scan-Zeitpunkt; die E-Mail selbst bleibt unverändert im Postfach.</p>
+              </div>}
+              <DialogFooter><Button variant="outline" onClick={() => setDetails(null)}>Schließen</Button></DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div><ScrollFade strength={toolbarFade} direction="horizontal" compact targetRef={toolbarScrollRef} /></div>
       {scoreOpen && <div className="mt-3 flex items-center gap-4 rounded-[10px] border border-white/10 bg-[#1b1b1b] px-4 py-3"><span className="shrink-0 text-xs text-[#888]">Score von/bis</span><div className="max-w-md flex-1"><DualRangeSlider min={scoreRange.min} max={scoreRange.max} onChange={(min, max) => { setSelected([]); setScoreRange({ min, max }) }} /></div><span className="shrink-0 font-mono text-xs text-[#ccc]">{scoreRange.min}–{scoreRange.max}%</span></div>}
@@ -739,11 +760,11 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
             <Table containerClassName="overflow-visible" className="w-[1224px] table-fixed">
               <colgroup><col className="w-[56px]" /><col className="w-[264px]" /><col className="w-[130px]" /><col className="w-[170px]" /><col className="w-[274px]" /><col className="w-[170px]" /><col className="w-[160px]" /></colgroup>
           <TableBody>{filtered.map((item) => {
-            const active = selected.includes(item.id)
+            const active = selectedSet.has(item.id)
             const reason = item.evidence.map((entry) => entry.summary).join(" · ")
             return <TableRow key={item.id} data-state={active ? "selected" : undefined} className="h-16 border-white/[0.09] bg-transparent text-[#a8a8a8] hover:bg-white/[0.025] data-[state=selected]:bg-[#101010] data-[state=selected]:text-white">
               <TableCell className={`px-4 ${shortDivider}`}><Checkbox checked={active} onCheckedChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></TableCell>
-              <TableCell className={`px-3 text-sm ${shortDivider}`}><div className="flex min-w-0 items-center gap-2"><Tooltip><TooltipTrigger render={<button className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label="Mail öffnen" onClick={() => void openDefaultMailClient()}><MailOpen className="size-3.5" /></button>} /><TooltipContent side="top">Mail öffnen</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<span className="min-w-0 truncate" tabIndex={0}>{item.from}</span>} /><TooltipContent side="top">{item.from}</TooltipContent></Tooltip></div></TableCell>
+              <TableCell className={`px-3 text-sm ${shortDivider}`}><div className="flex min-w-0 items-center gap-2"><Tooltip><TooltipTrigger render={<button className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label="Details anzeigen" onClick={() => setDetails(item)}><MailOpen className="size-3.5" /></button>} /><TooltipContent side="top">Details anzeigen</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<span className="min-w-0 truncate" tabIndex={0}>{item.from}</span>} /><TooltipContent side="top">{item.from}</TooltipContent></Tooltip></div></TableCell>
               <TableCell className={`px-4 font-mono text-xs transition-colors ${shortDivider}`} style={{ color: scoreColor(item.score) }}>{Math.round(item.score * 100)} %</TableCell>
               <TableCell className={`px-4 text-xs text-[#888] ${shortDivider}`}><span className="flex items-center gap-1.5">{item.evidence.some((entry) => entry.group === "model") && <Tooltip><TooltipTrigger render={<Bot className="size-3.5 shrink-0 text-[#888]" aria-label="von KI-geprüft" />} /><TooltipContent side="top">von KI-geprüft</TooltipContent></Tooltip>}<span className="truncate">{spamCategory(item)}</span></span></TableCell>
               <TableCell className={`px-4 ${shortDivider}`}><Tooltip><TooltipTrigger render={<p className="truncate text-sm" tabIndex={0}>{item.subject}</p>} /><TooltipContent side="top">{item.subject}</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<p className="mt-1 truncate text-xs text-[#666]" tabIndex={0}>{reason}</p>} /><TooltipContent side="top">{reason}</TooltipContent></Tooltip></TableCell>
@@ -925,8 +946,8 @@ function ToolbarButton({ children, iconOnly = false, ...props }: React.ButtonHTM
 function ToolbarConnector() { return <span aria-hidden className="h-px w-2 shrink-0 bg-white/10" /> }
 
 function FilterToolbarButton({ active, open, count, onToggle, onReset }: { active: boolean; open: boolean; count: number; onToggle: () => void; onReset: () => void }) {
-  return <div className={`flex h-[52px] shrink-0 items-center rounded-md border transition-colors ${active ? "border-white bg-white text-[#171717]" : "border-white/10 bg-white/[0.05] text-[#a8a8a8]"}`}>
-    <button className="h-full px-3.5 text-[14px]" onClick={onToggle} aria-expanded={open}>Filter <span className="opacity-70">({count} {count === 1 ? "Mail" : "Mails"})</span></button>
+  return <div className={`flex h-[52px] shrink-0 items-center rounded-md border transition-colors ${active ? "border-white bg-white text-[#171717]" : "border-white/10 bg-white/[0.05] text-[#a8a8a8] hover:bg-white/[0.08] hover:text-white"}`}>
+    <button className="h-full px-3.5 text-[14px]" onClick={onToggle} aria-expanded={open}>Filter <span className="inline-block min-w-[92px] text-left tabular-nums opacity-70">({count} {count === 1 ? "Mail" : "Mails"})</span></button>
     <button className={`mr-1 flex size-9 items-center justify-center rounded-md transition-colors ${active ? "hover:bg-black/10" : "hover:bg-white/[0.07] hover:text-white"}`} onClick={active ? onReset : onToggle} aria-label={active ? "Filter zurücksetzen" : "Filter öffnen"}>{active ? <RotateCcw className="size-4" /> : <ListFilter className="size-4" />}</button>
   </div>
 }
