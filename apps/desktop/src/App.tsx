@@ -83,16 +83,20 @@ const chartDataByPeriod: Record<string, Array<{ label: string; spam: number; inb
   Gesamt: ["2022", "2023", "2024", "2025", "2026"].map((label, index) => ({ label, spam: [1820, 2460, 3110, 3840, 2730][index], inbox: [16800, 20100, 24800, 29100, 22400][index], falsePositive: [78, 92, 108, 126, 81][index] })),
 }
 
-const notifications = [
-  { id: "weekly-analysis", title: "Wochenanalyse abgeschlossen", detail: "438 Nachrichten geprüft, 86 als Spam zugeordnet.", time: "Heute, 16:00", action: false },
-  { id: "review-required", title: "12 Fälle benötigen eine Prüfung", detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: "Heute, 15:58", action: true },
-  { id: "model-available", title: "Lokales Modell verfügbar", detail: "qwen3:4b-instruct antwortet und kann validiert werden.", time: "Gestern", action: false },
+// Benachrichtigungsarten für den Filter; Labels sind neutral gehalten.
+type NotificationKind = "scan" | "review" | "schedule" | "error" | "model"
+const notificationKindLabels: Record<NotificationKind | "all", string> = { all: "Alle Arten", scan: "Scans", review: "Prüffälle", schedule: "Wochenprüfung", error: "Fehler", model: "KI-Modell" }
+
+const notifications: NotificationItem[] = [
+  { id: "weekly-analysis", kind: "scan", title: "Wochenanalyse abgeschlossen", detail: "438 Nachrichten geprüft, 86 als Spam zugeordnet.", time: "Heute, 16:00", action: false },
+  { id: "review-required", kind: "review", title: "12 Fälle benötigen eine Prüfung", detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: "Heute, 15:58", action: true },
+  { id: "model-available", kind: "model", title: "Lokales Modell verfügbar", detail: "qwen3:4b-instruct antwortet und kann validiert werden.", time: "Gestern", action: false },
 ]
 
 // Echte Benachrichtigungen aus dem Agent-Eventstream. Zeitstempel werden erst
 // beim Rendern formatiert, damit „Heute/Gestern“ über Neustarts korrekt bleibt.
-type AgentNotification = { id: string; title: string; detail: string; time: number; action: boolean }
-type NotificationItem = { id: string; title: string; detail: string; time: string; action: boolean }
+type AgentNotification = { id: string; kind: NotificationKind; title: string; detail: string; time: number; action: boolean }
+type NotificationItem = { id: string; kind: NotificationKind; title: string; detail: string; time: string; action: boolean }
 
 function formatNotificationTime(ms: number): string {
   const date = new Date(ms)
@@ -217,6 +221,18 @@ export default function App() {
   })
   useEffect(() => { if (isTauri()) localStorage.setItem("mailmune.notifications", JSON.stringify(agentNotifications)) }, [agentNotifications])
   const pushNotification = (item: AgentNotification) => setAgentNotifications((current) => [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 50))
+  // Das Archiv liegt in der App, damit der Nav-Punkt verschwindet, sobald
+  // alle Benachrichtigungen archiviert sind.
+  const [notificationArchive, setNotificationArchive] = useState<Record<string, number>>(() => {
+    try {
+      const stored = JSON.parse(readStoredValue("mailmune.notificationArchive", "spamalytic.notificationArchive", "{}")) as Record<string, number>
+      const cutoff = Date.now() - 180 * 86_400_000
+      return Object.fromEntries(Object.entries(stored).filter(([, archivedAt]) => archivedAt >= cutoff).slice(-500))
+    } catch { return {} }
+  })
+  useEffect(() => { localStorage.setItem("mailmune.notificationArchive", JSON.stringify(notificationArchive)) }, [notificationArchive])
+  const notificationItems: NotificationItem[] = isTauri() ? agentNotifications.map(({ time, ...rest }) => ({ ...rest, time: formatNotificationTime(time) })) : notifications
+  const hasOpenNotifications = notificationItems.some((item) => !notificationArchive[item.id])
   const [compactNav, setCompactNav] = useState(false)
   const narrowApp = useMediaQuery("(max-width: 890px)")
   const effectiveCompactNav = narrowApp || compactNav
@@ -266,17 +282,17 @@ export default function App() {
         window.clearTimeout(scanNoticeTimer.current)
         scanNoticeTimer.current = window.setTimeout(() => setScanNotice(null), 8000)
         if (data.run.status === "completed") {
-          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: (data.candidates ?? 0) > 0 })
+          pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: (data.candidates ?? 0) > 0 })
         } else if (data.run.status === "failed") {
-          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false })
+          pushNotification({ id: `scan-${data.run.id}`, kind: "error", title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false })
         } else if (data.run.status === "cancelled") {
-          pushNotification({ id: `scan-${data.run.id}`, title: "Prüfung abgebrochen", detail: "Der Lauf wurde manuell beendet.", time: Date.now(), action: false })
+          pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgebrochen", detail: "Der Lauf wurde manuell beendet.", time: Date.now(), action: false })
         }
       } else if (event.type === "schedule.deep_scan") {
-        pushNotification({ id: `deep-${Date.now()}`, title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false })
+        pushNotification({ id: `deep-${Date.now()}`, kind: "schedule", title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false })
       } else if (event.type === "schedule.error") {
         const data = event.data as { accountId?: string; error?: string }
-        pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false })
+        pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, kind: "error", title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false })
       }
       void refresh()
     }
@@ -312,7 +328,7 @@ export default function App() {
       const title = `${summary.pending} Fälle benötigen eine Prüfung`
       const existing = current.find((entry) => entry.id === "review-required")
       if (existing && existing.title === title) return current
-      return [{ id: "review-required", title, detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: Date.now(), action: true }, ...current.filter((entry) => entry.id !== "review-required")].slice(0, 50)
+      return [{ id: "review-required", kind: "review" as const, title, detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: Date.now(), action: true }, ...current.filter((entry) => entry.id !== "review-required")].slice(0, 50)
     })
   }, [summary.pending])
 
@@ -320,7 +336,7 @@ export default function App() {
     <TooltipProvider>
       <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
         <WindowControls />
-        <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} accounts={accounts} activeAccountId={activeId} onSelectAccount={setActiveAccountId} refresh={refresh} />
+        <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} accounts={accounts} activeAccountId={activeId} onSelectAccount={setActiveAccountId} refresh={refresh} notificationDot={hasOpenNotifications} />
         <main className="relative min-w-0 flex-1 overflow-hidden">
           {/* Rahmenloses Fenster: dieser transparente Bereich oben ersetzt die
               native Titelleiste zum Ziehen; Doppelklick maximiert. Er liegt im
@@ -331,7 +347,7 @@ export default function App() {
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
             {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} />}
             {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} />}
-            {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={isTauri() ? agentNotifications.map(({ time, ...rest }) => ({ ...rest, time: formatNotificationTime(time) })) : notifications} onReview={isTauri() ? () => setPage("review") : undefined} />}
+            {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={notificationItems} archive={notificationArchive} onArchiveChange={setNotificationArchive} onReview={isTauri() ? () => setPage("review") : undefined} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} activeAccountId={activeId} />}
           </div>
           </div>
@@ -401,7 +417,7 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
   </div>
 }
 
-function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending, accounts, activeAccountId, onSelectAccount, refresh }: { page: Page; onPage: (page: Page) => void; compact: boolean; compactLocked: boolean; onCompact: () => void; pending: number; accounts: Account[]; activeAccountId: string | null; onSelectAccount: (id: string) => void; refresh: () => void }) {
+function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending, accounts, activeAccountId, onSelectAccount, refresh, notificationDot }: { page: Page; onPage: (page: Page) => void; compact: boolean; compactLocked: boolean; onCompact: () => void; pending: number; accounts: Account[]; activeAccountId: string | null; onSelectAccount: (id: string) => void; refresh: () => void; notificationDot: boolean }) {
   const primary = [{ id: "dashboard" as const, label: "Übersicht", icon: LayoutDashboard }, { id: "review" as const, label: "Zuordnung", icon: Table2 }]
   const secondary = [{ id: "notifications" as const, label: "Benachrichtigungen", icon: Bell }, { id: "settings" as const, label: "Einstellungen", icon: Settings }]
   return (
@@ -415,7 +431,7 @@ function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending, acc
           {primary.map((item) => <NavItem key={item.id} {...item} active={page === item.id} compact={compact} onClick={() => onPage(item.id)} badge={item.id === "review" && pending ? pending : undefined} />)}
         </nav>
         <nav className="flex flex-col gap-0">
-          {secondary.map((item) => <NavItem key={item.id} {...item} active={page === item.id} compact={compact} onClick={() => onPage(item.id)} />)}
+          {secondary.map((item) => <NavItem key={item.id} {...item} active={page === item.id} compact={compact} onClick={() => onPage(item.id)} dot={item.id === "notifications" && notificationDot} />)}
         </nav>
         <AccountSwitcher compact={compact} accounts={accounts} activeAccountId={activeAccountId} onSelectAccount={onSelectAccount} refresh={refresh} />
       </div>
@@ -423,9 +439,9 @@ function Sidebar({ page, onPage, compact, compactLocked, onCompact, pending, acc
   )
 }
 
-function NavItem({ id, label, icon: Icon, active, compact, onClick, badge }: { id: string; label: string; icon: typeof Bell; active: boolean; compact: boolean; onClick: () => void; badge?: number }) {
+function NavItem({ label, icon: Icon, active, compact, onClick, badge, dot }: { id: string; label: string; icon: typeof Bell; active: boolean; compact: boolean; onClick: () => void; badge?: number; dot?: boolean }) {
   const button = <button onClick={onClick} aria-label={compact ? label : undefined} className={`flex h-11 w-full items-center rounded-md border text-sm outline-none transition-colors focus-visible:border-white/20 ${compact ? "justify-center px-0" : "gap-3 px-3.5"} ${active ? "border-white/10 bg-white/[0.06] text-white" : "border-transparent text-[#a8a8a8] hover:border-white/10 hover:bg-white/[0.04] hover:text-white"}`}>
-    <span className="relative shrink-0"><Icon className="size-4" />{id === "notifications" && <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-[#ff6b2c] ring-2 ring-[#1d1d1d]" />}</span>{!compact && <><span className="truncate">{label}</span>{badge ? <span className="ml-auto flex min-w-[30px] items-center justify-center rounded-[4px] bg-white px-2 py-0.5 text-[11px] font-medium text-[#666]">{badge}</span> : null}</>}
+    <span className="relative shrink-0"><Icon className="size-4" />{dot && <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-[#ff6b2c] ring-2 ring-[#1d1d1d]" />}</span>{!compact && <><span className="truncate">{label}</span>{badge ? <span className="ml-auto flex min-w-[30px] items-center justify-center rounded-[4px] bg-white px-2 py-0.5 text-[11px] font-medium text-[#666]">{badge}</span> : null}</>}
   </button>
   if (!compact) return button
   return <Tooltip><TooltipTrigger render={button} /><TooltipContent side="right" sideOffset={10}>{label}</TooltipContent></Tooltip>
@@ -889,23 +905,53 @@ function SortableHead({ label, name, sort, setSort, icon: HeadIcon, last = false
 
 function StatusBadge({ status }: { status: Decision["status"] }) { const labels = { pending: "Review", moved: "Review", confirmed: "Bestätigt", rejected: "Fehlalarm", deferred: "Später" }; return <Badge variant="outline" className="border-white/10 bg-white/[0.025] text-[#aaa]">{labels[status]}</Badge> }
 
-function Notifications({ scrollRef, items = notifications, onReview }: { scrollRef: React.RefObject<HTMLElement | null>; items?: NotificationItem[]; onReview?: () => void }) {
+function Notifications({ scrollRef, items = notifications, archive, onArchiveChange, onReview }: { scrollRef: React.RefObject<HTMLElement | null>; items?: NotificationItem[]; archive: Record<string, number>; onArchiveChange: (archive: Record<string, number>) => void; onReview?: () => void }) {
   const [view, setView] = useState<"open" | "archived">("open")
-  const [archived, setArchived] = useState<Record<string, number>>(() => {
-    try {
-      const stored = JSON.parse(readStoredValue("mailmune.notificationArchive", "spamalytic.notificationArchive", "{}")) as Record<string, number>
-      const cutoff = Date.now() - 180 * 86_400_000
-      return Object.fromEntries(Object.entries(stored).filter(([, archivedAt]) => archivedAt >= cutoff).slice(-500))
-    } catch { return {} }
-  })
-  useEffect(() => { localStorage.setItem("mailmune.notificationArchive", JSON.stringify(archived)) }, [archived])
-  const visible = items.filter((item) => view === "archived" ? Boolean(archived[item.id]) : !archived[item.id])
+  const [query, setQuery] = useState("")
+  const [kind, setKind] = useState<NotificationKind | "all">("all")
+  const [selected, setSelected] = useState<string[]>([])
+  const visible = items
+    .filter((item) => view === "archived" ? Boolean(archive[item.id]) : !archive[item.id])
+    .filter((item) => kind === "all" || item.kind === kind)
+    .filter((item) => { const q = query.trim().toLowerCase(); return q === "" || item.title.toLowerCase().includes(q) || item.detail.toLowerCase().includes(q) })
   const notificationSections = visible.map((item) => ({ id: `notification-${item.id}`, label: item.title }))
+  const allSelected = visible.length > 0 && selected.length === visible.length
+  // Massenaktion: im offenen Blick archivieren, im Archiv wiederherstellen.
+  const bulkAction = () => {
+    const next = { ...archive }
+    for (const id of selected) { if (view === "open") next[id] = Date.now(); else delete next[id] }
+    onArchiveChange(next)
+    setSelected([])
+  }
   return <div className="relative">
-    <div className="flex items-start justify-between gap-6"><h1 className="pt-1 text-2xl font-medium tracking-tight">Benachrichtigungen</h1><SegmentedControl ariaLabel="Benachrichtigungsansicht" options={[{ value: "open", label: "Offen", icon: Bell }, { value: "archived", label: "Archiviert", icon: Archive }]} value={view} onChange={setView} /></div>
-    <div className="mt-12 max-w-4xl">
-    <div className="border-y border-white/[0.09]">{visible.map((item) => <div key={item.id} data-section-id={`notification-${item.id}`} className="flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0"><div className="relative flex size-9 shrink-0 items-center justify-center text-[#999]"><Bell className="size-4" />{item.action && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[#ff6b2c]" />}</div><div className="min-w-0 flex-1"><p className="text-sm font-medium">{item.title}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>{item.action && view === "open" && <Button size="sm" variant="outline" onClick={onReview}>Prüfen</Button>}<button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => setArchived((current) => { const next = { ...current }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; return next })}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button></div>)}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
+    <div className="flex items-start justify-between gap-6"><h1 className="pt-1 text-2xl font-medium tracking-tight">Benachrichtigungen</h1><SegmentedControl ariaLabel="Benachrichtigungsansicht" options={[{ value: "open", label: "Offen", icon: Bell }, { value: "archived", label: "Archiviert", icon: Archive }]} value={view} onChange={(next) => { setView(next); setSelected([]) }} /></div>
+        {/* Toolbar: Suche + Benachrichtigungsart – gleicher Stil und Position wie bei der Zuordnungstabelle */}
+        <div className="mt-8 flex max-w-4xl items-center gap-2">
+          <div className="relative h-[52px] w-[300px] min-w-[220px] shrink-0">
+            <Input value={query} onChange={(event) => { setQuery(event.target.value); setSelected([]) }} placeholder="Durchsuchen" className="h-full rounded-md border-white/10 bg-white/[0.05] px-3.5 pr-11 text-sm placeholder:text-[#888]" />
+            <Search className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-[#888]" />
+          </div>
+          <Select value={kind} onValueChange={(value) => { setKind(value as NotificationKind | "all"); setSelected([]) }}>
+            <SelectTrigger className={`h-[52px]! min-w-[168px] shrink-0 rounded-md px-3.5 text-sm! ${kind !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{notificationKindLabels[kind]}</SelectValue></SelectTrigger>
+            <SelectContent>{(["all", "scan", "review", "schedule", "error", "model"] as const).map((value) => <SelectItem key={value} value={value}>{notificationKindLabels[value]}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+    <div className="mt-4 max-w-4xl">
+    <div className="flex items-center gap-4 border-y border-white/[0.09] py-3">
+      <Checkbox checked={allSelected} onCheckedChange={() => setSelected(allSelected ? [] : visible.map((item) => item.id))} aria-label="Alle auswählen" />
+      <span className="text-xs text-[#888]">{visible.length} {view === "open" ? "offene" : "archivierte"}{selected.length > 0 ? ` · ${selected.length} ausgewählt` : ""}</span>
+    </div>
+    <div className="border-b border-white/[0.09]">{visible.map((item) => { const isSelected = selected.includes(item.id); return <div key={item.id} data-section-id={`notification-${item.id}`} className={`flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0 ${isSelected ? "bg-white/[0.03]" : ""}`}>
+      <Checkbox checked={isSelected} onCheckedChange={(checked) => setSelected((current) => checked ? [...current, item.id] : current.filter((id) => id !== item.id))} aria-label={`${item.title} auswählen`} />
+      <div className="min-w-0 flex-1"><p className="flex items-center gap-2 text-sm font-medium"><span className="truncate">{item.title}</span>{item.action && <span className="size-1.5 shrink-0 rounded-full bg-[#ff6b2c]" />}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>
+      {item.action && view === "open" && <Button size="sm" variant="outline" onClick={onReview}>Prüfen</Button>}
+      <button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => { const next = { ...archive }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; onArchiveChange(next) }}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button>
+    </div> })}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
     {view === "archived" && <p className="mt-3 text-right text-[11px] text-[#555]">Archivierte Einträge werden nach 180 Tagen entfernt.</p>}
+    </div>
+    {/* Massenaktions-Leiste: klebt am unteren Rand des sichtbaren Bereichs */}
+    <div className="sticky bottom-0 h-0">
+      <FloatingActions visible={selected.length > 0} primary={view === "open" ? `Archivieren (${selected.length})` : `Wiederherstellen (${selected.length})`} onPrimary={bulkAction} onCancel={() => setSelected([])} />
     </div>
     <SectionIndicator items={notificationSections} scrollRef={scrollRef} />
   </div>

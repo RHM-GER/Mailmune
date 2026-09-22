@@ -171,9 +171,9 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 
 **Navigation & Benachrichtigungen**
 - [ ] Profil-Switcher in Nav: „Profil hinzufügen"-Button öffnet das Overlay nicht (defekt)
-- [ ] Oranger Punkt am Benachrichtigungs-Icon in Nav muss verschwinden, wenn alle Benachrichtigungen archiviert sind
-- [ ] Benachrichtigungsseite: Suche + Filter (Filterkriterium = Benachrichtigungsart) an gleicher Position/im gleichen Stil wie bei der Tabelle – componentbasiert wiederverwenden
-- [ ] Benachrichtigungs-Items: Checkbox statt Icon (Einzelauswahl + alle markieren + direkt archivieren); im Archiv umgekehrt (wiederherstellen). Listenstil behalten, keine Tabelle
+- [x] Oranger Punkt am Benachrichtigungs-Icon in Nav verschwindet, wenn alle Benachrichtigungen archiviert sind (Archiv-State in App gehoben)
+- [x] Benachrichtigungsseite: Suche + Filter nach Benachrichtigungsart (Scans/Prüffälle/Wochenprüfung/Fehler/KI-Modell) im Tabellen-Stil
+- [x] Benachrichtigungs-Items: Checkbox statt Icon, Alle auswählen, Massen-Leiste „Archivieren (N)“ bzw. „Wiederherstellen (N)“ im Archiv; Listenstil beibehalten
 - [ ] Dashboard „Letzte Benachrichtigung": Link zur jeweiligen Benachrichtigung
 - [ ] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification)
 
