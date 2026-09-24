@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, Eye, EyeOff, Gauge, Globe2, GlobeCheck, GlobeX, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, CornerDownLeft, Eye, EyeOff, Gauge, Globe2, GlobeCheck, GlobeX, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -1361,6 +1361,44 @@ function TransferPlaceholder({ kind, accountId }: { kind: "learning" | "profile"
   return <><Tooltip><TooltipTrigger render={<Button size="sm" variant="outline" onClick={() => setOpen(true)}>{learning ? "Lerntransfer" : "Profiltransfer"}</Button>} /><TooltipContent side="top">{learning ? "Anonymisierte Lernmerkmale übertragen" : "Vollständiges Lernprofil übertragen"}</TooltipContent></Tooltip><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]"><DialogHeader><DialogTitle>{learning ? "Lerndaten übertragen" : "Profil übertragen"}</DialogTitle><DialogDescription>{learning ? "Überträgt ausschließlich allgemeine, anonymisierte Lernmerkmale ohne Nachrichtentexte oder personenbezogene Daten." : "Überträgt Regeln, Präferenzen und postfachspezifische Lernmerkmale in ein anderes Profil."}</DialogDescription></DialogHeader><div className="space-y-3 py-2"><Label htmlFor={`${kind}-target`}>Zielprofil</Label><Input id={`${kind}-target`} className="h-12 px-3.5" placeholder="Profile durchsuchen" /><div className="rounded-[10px] border border-dashed border-white/10 px-4 py-5 text-center text-xs text-[#666]">Die direkte Profilauswahl und Übertragung werden später angebunden. „Exportieren“ erstellt eine portable Datei für einen anderen Rechner.</div></div><DialogFooter><Button variant="outline" disabled={busy || !accountId} onClick={() => void exportData()}>{busy ? "Exportiere…" : "Exportieren"}</Button><Button variant="outline" onClick={() => setOpen(false)}>Schließen</Button></DialogFooter></DialogContent></Dialog></>
 }
 
+// Vollständige Sprachauswahl mit Suchfeld und Checkboxen im Dropdown –
+// dieselbe Mehrfachauswahl-Anmutung wie die shadcn-Combobox-Patterns, aber
+// mit den vorhandenen primitives gebaut (kein neues Dependency).
+const allLanguages = ["Deutsch", "Englisch", "Französisch", "Spanisch", "Italienisch", "Portugiesisch", "Niederländisch", "Polnisch", "Tschechisch", "Slowakisch", "Ungarisch", "Rumänisch", "Bulgarisch", "Kroatisch", "Slowenisch", "Griechisch", "Türkisch", "Arabisch", "Hebräisch", "Russisch", "Ukrainisch", "Chinesisch", "Japanisch", "Koreanisch", "Vietnamesisch", "Thailändisch", "Indonesisch", "Hindi", "Schwedisch", "Dänisch", "Norwegisch", "Finnisch", "Estnisch", "Lettisch", "Litauisch", "Isländisch"]
+
+function LanguageMultiSelect({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false) }
+    document.addEventListener("mousedown", onDown)
+    return () => document.removeEventListener("mousedown", onDown)
+  }, [open])
+  const filtered = allLanguages.filter((language) => language.toLowerCase().includes(query.trim().toLowerCase()))
+  const toggle = (language: string) => onChange(value.includes(language) ? value.filter((item) => item !== language) : [...value, language])
+  return <div ref={rootRef} className="relative">
+    <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="listbox" className="flex h-12 w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3.5 text-sm text-[#ccc] transition-colors hover:bg-white/[0.08]">
+      <span className="truncate">{value.length > 0 ? value.join(", ") : "Sprachen wählen"}</span>
+      <ChevronDown className={`size-4 shrink-0 text-[#777] transition-transform ${open ? "rotate-180" : ""}`} />
+    </button>
+    {open && <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 rounded-md border border-white/10 bg-[#232323] p-2 shadow-[0_30px_60px_rgba(0,0,0,.45)]">
+      <div className="relative mb-2">
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sprache suchen" className="h-10 px-3.5 pr-10 text-sm" autoFocus />
+        <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[#777]" />
+      </div>
+      <div className="max-h-56 overflow-y-auto" role="listbox" aria-multiselectable>
+        {filtered.map((language) => <label key={language} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[#ccc] transition-colors hover:bg-white/[0.05]">
+          <Checkbox checked={value.includes(language)} onCheckedChange={() => toggle(language)} aria-label={language} />
+          <span className="truncate">{language}</span>
+        </label>)}
+        {filtered.length === 0 && <p className="px-2 py-3 text-center text-xs text-[#666]">Keine Sprache gefunden</p>}
+      </div>
+    </div>}
+  </div>
+}
+
 // Postfach-Einstellungen: derselbe Umfang wie die Einrichtung, nachträglich
 // anpassbar – organisiert in Bereichen (Verbindung / KI-Profil / Verhalten).
 // Speichern ohne Passwort lässt den Schlüsselbund-Eintrag unangetastet;
@@ -1379,6 +1417,12 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   const [profileState, setProfileState] = useState<{ model: ProfileModel | null; stale: boolean } | null>(null)
   const [compiling, setCompiling] = useState(false)
   const [compileError, setCompileError] = useState("")
+  // Tag-Eingabe für erwartete Mailtypen.
+  const [mailTypeDraft, setMailTypeDraft] = useState("")
+  // Lernen zurücksetzen (mit Bestätigung).
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetMessage, setResetMessage] = useState("")
   // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
   // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
   // Eingaben mitten im Tippen überschreiben.
@@ -1437,14 +1481,39 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
       // UI-Zustand bleibt unverändert; der nächste Dialog-Aufruf lädt neu.
     }
   }
-  const toggleMailType = (preset: string) => {
-    const has = draft.profile.expectedMailTypes.includes(preset)
-    setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: has ? draft.profile.expectedMailTypes.filter((value) => value !== preset) : [...draft.profile.expectedMailTypes, preset] } })
+  const addMailTypeValue = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed || draft.profile.expectedMailTypes.includes(trimmed)) return
+    setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: [...draft.profile.expectedMailTypes, trimmed] } })
   }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
+  const addMailType = () => {
+    addMailTypeValue(mailTypeDraft)
+    setMailTypeDraft("")
+  }
+  const removeMailType = (value: string) => {
+    setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: draft.profile.expectedMailTypes.filter((item) => item !== value) } })
+  }
+  const doResetLearning = async () => {
+    setResetBusy(true)
+    setResetMessage("")
+    try {
+      const result = await resetLearning(account.id)
+      setResetMessage(result.cleared > 0
+        ? `Lokales Lernen zurückgesetzt: ${result.cleared} bestätigte Beispiele entfernt. Entscheidungen und E-Mails bleiben unverändert.`
+        : "Kein gespeichertes Lernen zum Zurücksetzen vorhanden.")
+    } catch (cause) {
+      setResetMessage(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setResetBusy(false)
+      setResetOpen(false)
+    }
+  }
+  return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
     <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle><DialogDescription>Alles aus der Einrichtung ist hier anpassbar. Speichern ohne neues Passwort lässt das gespeicherte Passwort unangetastet.</DialogDescription></DialogHeader>
-    <div className="py-1">
-      <SegmentedControl ariaLabel="Einstellungsbereiche" options={[{ value: "connection", label: "Verbindung" }, { value: "profile", label: "KI-Profil" }, { value: "behavior", label: "Verhalten" }]} value={tab} onChange={(next) => { if (next) setTab(next) }} />
+    {/* Bereichs-Tabs: nur so breit wie ihr Inhalt; werden es mehr als in die
+        Karte passen, wird der Wrapper zum Scroll-Container. */}
+    <div className="overflow-x-auto py-1">
+      <SegmentedControl className="w-fit" ariaLabel="Einstellungsbereiche" options={[{ value: "connection", label: "Verbindung" }, { value: "profile", label: "KI-Profil" }, { value: "behavior", label: "Verhalten" }]} value={tab} onChange={(next) => { if (next) setTab(next) }} />
     </div>
     {tab === "connection" && <div className="space-y-4 py-2">
       <div className="grid grid-cols-2 gap-3">
@@ -1477,11 +1546,15 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
       <Field label="Zweck des Postfachs"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Angebote und Rechnungen einer Design-Agentur für Websites und Logos" value={draft.profile.purpose} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, purpose: event.target.value } })} /></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Branche"><Input className="h-12 px-3.5" value={draft.profile.industry} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, industry: event.target.value } })} /></Field>
-        <Field label="Erwartete Sprachen"><Input className="h-12 px-3.5" value={draft.profile.languages.join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, languages: event.target.value.split(/[,;]/).map((value) => value.trim()).filter(Boolean) } })} /></Field>
+        <Field label="Erwartete Sprachen"><LanguageMultiSelect value={draft.profile.languages} onChange={(next) => setDraft({ ...draft, profile: { ...draft.profile, languages: next } })} /></Field>
       </div>
       <Field label="Welche Mails erwartest du?">
-        <div className="flex flex-wrap gap-2">{mailTypePresets.map((preset) => { const active = draft.profile.expectedMailTypes.includes(preset); return <button key={preset} type="button" onClick={() => toggleMailType(preset)} aria-pressed={active} className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${active ? "border-white bg-white text-[#171717]" : "border-white/10 bg-white/[0.04] text-[#aaa] hover:bg-white/[0.08]"}`}>{preset}</button> })}</div>
-        <Input className="mt-2 h-12 px-3.5" placeholder="Eigene Typen, kommagetrennt" value={draft.profile.expectedMailTypes.filter((value) => !mailTypePresets.includes(value)).join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: [...mailTypePresets.filter((preset) => draft.profile.expectedMailTypes.includes(preset)), ...event.target.value.split(",").map((value) => value.trim()).filter(Boolean)] } })} />
+        <div className="flex gap-2">
+          <Input className="h-12 flex-1 px-3.5" placeholder="Mailtyp eingeben, Enter drücken" value={mailTypeDraft} onChange={(event) => setMailTypeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addMailType() } }} />
+          <button type="button" aria-label="Mailtyp hinzufügen" onClick={addMailType} disabled={!mailTypeDraft.trim()} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.05] text-[#a8a8a8] transition-colors hover:bg-white/[0.08] hover:text-white disabled:pointer-events-none disabled:opacity-40"><CornerDownLeft className="size-4" /></button>
+        </div>
+        {draft.profile.expectedMailTypes.length > 0 && <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1.5">{draft.profile.expectedMailTypes.map((type) => <span key={type} className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[#ccc]">{type}<button type="button" aria-label={`${type} entfernen`} onClick={() => removeMailType(type)} className="text-[#777] transition-colors hover:text-white"><X className="size-3" /></button></span>)}</div>}
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">{mailTypePresets.filter((preset) => !draft.profile.expectedMailTypes.includes(preset)).map((preset) => <button key={preset} type="button" onClick={() => addMailTypeValue(preset)} className="flex items-center gap-1 rounded-md border border-dashed border-white/15 px-2.5 py-1 text-xs text-[#777] transition-colors hover:border-white/30 hover:text-[#ccc]"><Plus className="size-3" />{preset}</button>)}</div>
       </Field>
       <Field label="Ungewöhnlich, aber legitim"><Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Newsletter von Design-Blogs, Rechnungen vom Hosting-Anbieter, Mails von Freelancern" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
       <Field label="Was erwartest du hier NIEMALS?">
@@ -1512,14 +1585,22 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
         )}
       </div>
     </div>}
-    {tab === "behavior" && <div className="py-2">
-      <p className="mb-1 text-sm font-medium">Automatische Verschiebung & Lernen</p>
-      <p className="mb-1 text-xs leading-5 text-[#777]">Änderungen hier wirken sofort auf dieses Postfach – kein Speichern nötig.</p>
-      <AutomationPanel account={account} refresh={refresh} />
+    {tab === "behavior" && <div className="space-y-3 py-2">
+      {/* Automatische Verschiebung lebt bewusst NICHT hier: Sie ist über das
+          Spamverhalten/die Sicherheitsstufe in den Einstellungen pro Profil
+          geregelt. Hier bleibt nur der Reset des lokalen Lernens. */}
+      <div className="rounded-[10px] border border-white/[0.07] bg-white/[0.02] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2"><p className="text-sm font-medium">Lernen zurücksetzen</p><InfoTooltip><p>Entfernt die lokal gelernten Merkmale aus bestätigten Reviews für dieses Postfach. Entscheidungen und E-Mails bleiben unverändert.</p></InfoTooltip></div>
+          <Button size="sm" variant="outline" disabled={resetBusy} onClick={() => setResetOpen(true)}>{resetBusy ? "Setze zurück …" : "Zurücksetzen"}</Button>
+        </div>
+        {resetMessage && <p className="mt-2 text-xs leading-5 text-[#888]">{resetMessage}</p>}
+      </div>
     </div>}
     {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
     <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim() || !draft.host.trim() || !draft.username.trim() || (credentialsChanged && !password)} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
   </DialogContent></Dialog>
+  <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[420px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Die gelernten Merkmale aus bestätigten Reviews dieses Postfachs werden gelöscht. Entscheidungen und E-Mails bleiben unverändert; der Filter beginnt bei null zu lernen.</DialogDescription></DialogHeader><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog></>
 }
 
 function ConnectionCard({ icon: Icon, title, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {
