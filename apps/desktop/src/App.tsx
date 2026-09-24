@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, Eye, EyeOff, Gauge, Globe2, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, Eye, EyeOff, Gauge, Globe2, GlobeCheck, GlobeX, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, calibration, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
@@ -342,6 +342,19 @@ export default function App() {
       stopEvents?.()
     }
   }, [])
+
+  // Ollama-Start mit der App: ist die KI eines Profils eingeschaltet, wird
+  // Ollama einmalig automatisch gestartet, damit die KI-Filterung sofort
+  // einsatzbereit ist statt auf den manuellen Start zu warten.
+  const ollamaKicked = useRef(false)
+  useEffect(() => {
+    if (!isTauri() || ollamaKicked.current) return
+    const active = accounts.find((item) => item.id === activeId) ?? accounts[0]
+    if (active?.aiEnabled) {
+      ollamaKicked.current = true
+      void ensureOllamaRunning()
+    }
+  }, [accounts, activeId])
 
   // Profilwechsel: alle Datenansichten sofort für das neue Postfach laden.
   useEffect(() => { if (isTauri()) void refresh() }, [activeId])
@@ -1521,6 +1534,15 @@ function EmptyConnectionCard({ text }: { text: string }) {
   return <div className="flex min-h-20 items-center rounded-[10px] border border-dashed border-white/10 bg-white/[0.015] px-4 text-sm text-[#666]">{text}</div>
 }
 
+// KI-Status-Icon hinter Kontoname und Modellname: globe-check (gedimmt) wenn
+// Ollama erreichbar ist und das Modell lokal installiert ist, globe-x wenn die
+// KI eingeschaltet ist aber nicht funktioniert (Ollama aus, Modell fehlt).
+// Bei ausgeschalteter KI erscheint gar kein Icon.
+function AiStatusIcon({ ok, enabled }: { ok: boolean; enabled: boolean }) {
+  if (!enabled) return null
+  return <Tooltip><TooltipTrigger render={<span className="flex shrink-0 items-center text-[#666]" />}>{ok ? <GlobeCheck className="size-3.5" /> : <GlobeX className="size-3.5" />}</TooltipTrigger><TooltipContent side="top">{ok ? "Verbunden – die KI ist aktiv und einsatzbereit" : "Nicht verbunden – Ollama läuft nicht, das Modell fehlt oder ist nicht validiert"}</TooltipContent></Tooltip>
+}
+
 function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () => void }) {
   const account = accounts[0]
   const [installed, setInstalled] = useState<string[]>([])
@@ -1533,6 +1555,24 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   // muss das erst bestätigt werden (Fähigkeitstest verfällt, Bewertungen
   // können inkonsistent werden).
   const [pendingTag, setPendingTag] = useState<string | null>(null)
+  // Einstellungs-Dialog (Modell wählen / lokal installiert / validieren).
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Erreichbarkeit von Ollama für die Status-Icons: null = noch unbekannt.
+  const [reachable, setReachable] = useState<boolean | null>(null)
+  const [toggling, setToggling] = useState(false)
+
+  const loadModels = async () => {
+    try {
+      const [inst, rec] = await Promise.all([listModels(), recommendedModels()])
+      setInstalled(inst ?? [])
+      setRecommended(rec.models ?? [])
+      setOllamaError("")
+      setReachable(true)
+    } catch (error) {
+      setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+      setReachable(false)
+    }
+  }
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1543,8 +1583,12 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         if (cancelled) return
         setInstalled(inst ?? [])
         setRecommended(rec.models ?? [])
+        setReachable(true)
       } catch (error) {
-        if (!cancelled) setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+        if (!cancelled) {
+          setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+          setReachable(false)
+        }
       }
     })()
     return () => { cancelled = true }
@@ -1613,10 +1657,36 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       setStatus(error instanceof Error ? error.message : "Fähigkeitstest fehlgeschlagen")
     } finally {
       setBusy(false)
+      void loadModels()
+    }
+  }
+
+  // KI-Hauptschalter: AN startet Ollama bei Bedarf (App-Start oder hier),
+  // AUS deaktiviert die Modellnutzung komplett (nur Regeln + Lernfilter).
+  const toggleAI = async (enabled: boolean) => {
+    if (toggling) return
+    setToggling(true)
+    setStatus(enabled ? "Ollama wird geprüft und bei Bedarf gestartet …" : "")
+    try {
+      if (enabled) {
+        const up = await ensureOllamaRunning()
+        setReachable(up)
+        if (up) await loadModels()
+        setStatus(up
+          ? "Ollama läuft – KI-Filterung eingeschaltet."
+          : "Ollama konnte nicht automatisch gestartet werden. Bitte manuell starten (ollama serve) – die KI-Filterung bleibt eingeschaltet und das Icon zeigt den Status.")
+      }
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, aiEnabled: enabled } })
+      await refresh()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Umschalten fehlgeschlagen")
+    } finally {
+      setToggling(false)
     }
   }
 
   const validated = account.ollamaValidated && account.ollamaModel === selected
+  const aiOk = reachable === true && Boolean(account.ollamaModel) && installed.includes(account.ollamaModel ?? "")
   // Merge recommended + installed into one de-duplicated option list. A
   // recommended model that is not installed yet is flagged so the UI can show
   // the install command instead of failing later with a bare 404.
@@ -1634,36 +1704,63 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     options.push({ tag, label: tag, detail: "lokal installiert", recommended: false, installed: true })
   }
   const selectedOption = options.find((option) => option.tag === selected)
+  const subtitle = !account.aiEnabled
+    ? "KI ausgeschaltet – es prüfen nur Regeln und Lernfilter"
+    : validated ? "Ollama · lokal" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · kein Modell gewählt"
 
   return <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4">
     <div className="flex items-center gap-3">
       <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Bot className="size-4" /></div>
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate text-sm font-medium">{validated ? account.ollamaModel : selected || "Kein Modell gewählt"}<InfoTooltip><p>Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p></InfoTooltip></p>
-        <p className="mt-1 truncate text-xs text-[#666]">{validated ? "Ollama · lokal validiert" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · nicht verbunden"}</p>
+        <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
+          <span className="truncate">{account.name}</span>
+          <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} />
+          <span className="shrink-0 text-[#555]">·</span>
+          <span className="truncate">{account.ollamaModel || selected || "Kein Modell gewählt"}</span>
+          <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} />
+          <InfoTooltip><p>Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p></InfoTooltip>
+        </p>
+        <p className="mt-1 truncate text-xs text-[#666]">{subtitle}</p>
       </div>
-      {validated && <Badge className="shrink-0 border-white/10 bg-white/[0.06] text-[#d6d6d6]">aktiv</Badge>}
+      <div className="flex shrink-0 items-center gap-0.5">
+        <button className="flex size-8 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" onClick={() => setSettingsOpen(true)} aria-label="KI-Modell-Einstellungen"><Settings className="size-4" /></button>
+        <CompactOnOff enabled={account.aiEnabled} onChange={(enabled) => void toggleAI(enabled)} label="KI-Filterung" />
+      </div>
     </div>
 
     {ollamaError && <p className="mt-3 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{ollamaError}</p>}
-
-    <div className="mt-3 space-y-2">
-      <Label htmlFor="model-select">Modell wählen</Label>
-      <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
-        <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
-          <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}{!option.installed ? " – nicht installiert" : ""}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier den Fähigkeitstest erneut starten.</p>}</div>}
-    </div>
-
-    <div className="mt-3 flex flex-wrap gap-2">
-      <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
-    </div>
     {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
+
+    {/* Modell-Einstellungen: Wahl, Installation und Fähigkeitstest im Dialog,
+        wie bei den Postfach-Einstellungen – die Karte bleibt aufgeräumt. */}
+    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]">
+        <DialogHeader><DialogTitle>KI-Modell</DialogTitle><DialogDescription>Modell wählen, Installation prüfen und den Fähigkeitstest für {account.name} ausführen.</DialogDescription></DialogHeader>
+        <div className="space-y-3 py-2">
+          <Label htmlFor="model-select">Modell wählen</Label>
+          <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
+            <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
+              <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}{!option.installed ? " – nicht installiert" : ""}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier erneut den Fähigkeitstest starten.</p>}</div>}
+          <div>
+            <p className="mb-1.5 text-xs text-[#888]">Lokal installiert</p>
+            {installed.length > 0
+              ? <div className="flex flex-wrap gap-1.5">{installed.map((tag) => <span key={tag} className={`rounded-md border px-2 py-0.5 font-mono text-[11px] ${tag === account.ollamaModel ? "border-white/25 text-[#ccc]" : "border-white/10 text-[#777]"}`}>{tag}</span>)}</div>
+              : <p className="text-xs text-[#666]">{reachable === false ? "Ollama ist nicht erreichbar – bitte starten (ollama serve)." : "Keine Modelle gefunden. In einem Terminal: ollama pull <modell>"}</p>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
+          </div>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={() => setSettingsOpen(false)}>Schließen</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     {/* Modellwechsel-Warnung: ersetzt ein validiertes Modell, das im Einsatz war. */}
     <Dialog open={Boolean(pendingTag)} onOpenChange={(open) => { if (!open) setPendingTag(null) }}>
       <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[440px]">
@@ -1769,7 +1866,7 @@ function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hi
   const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "", unexpected: "" })
   const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, unexpected: form.unexpected, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
+  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, aiEnabled: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, unexpected: form.unexpected, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}

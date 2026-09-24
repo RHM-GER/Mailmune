@@ -83,6 +83,7 @@ func TestScanPassesLearnedContextToModel(t *testing.T) {
 	// Enable a validated local model on the account.
 	account.OllamaModel = "test-model"
 	account.OllamaValidated = true
+	account.AIEnabled = true
 	if err := db.UpsertAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +140,7 @@ func TestFullScanConsultsModelOnLowScoreMessage(t *testing.T) {
 
 	account.OllamaModel = "test-model"
 	account.OllamaValidated = true
+	account.AIEnabled = true
 	if err := db.UpsertAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +183,7 @@ func TestLowConfidenceSpamVerdictNeverLowersScore(t *testing.T) {
 
 	account.OllamaModel = "test-model"
 	account.OllamaValidated = true
+	account.AIEnabled = true
 	if err := db.UpsertAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
@@ -224,6 +227,7 @@ func TestModelCannotFloorLiftTrustedBrandMail(t *testing.T) {
 
 	account.OllamaModel = "test-model"
 	account.OllamaValidated = true
+	account.AIEnabled = true
 	if err := db.UpsertAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
@@ -389,5 +393,45 @@ func TestValidateAccountModelFailsOnBrokenAnswers(t *testing.T) {
 	}
 	if account.OllamaValidated {
 		t.Fatal("a failed capability test must not validate the model")
+	}
+}
+
+// TestAIDisabledNeverConsultsModel: KI-Hauptschalter AUS = das validierte
+// Modell wird kein einziges Mal aufgerufen, auch nicht im Vollscan.
+func TestAIDisabledNeverConsultsModel(t *testing.T) {
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	account := createTestAccount(t, svc, server, "acc-ai-off")
+	ctx := context.Background()
+
+	account.OllamaModel = "test-model"
+	account.OllamaValidated = true
+	account.AIEnabled = false
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		verdict, _ := json.Marshal(map[string]any{"class": "spam", "score": 0.9, "reasonCodes": []string{"TEST"}})
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": string(verdict)})
+	}))
+	t.Cleanup(fake.Close)
+	ollama, err := provider.NewOllama(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scanner.ollama = ollama
+
+	server.AddMessage("INBOX", "kollege@firma.example", "Meeting morgen", "Kurze Rueckfrage zum Termin", time.Now())
+	if _, err := svc.StartScan(ctx, account.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if run := waitForScan(t, svc, account.ID); run.Status != domain.ScanCompleted {
+		t.Fatalf("run: %s (%s)", run.Status, run.Error)
+	}
+	if called {
+		t.Fatal("with AI disabled the model must never be consulted")
 	}
 }

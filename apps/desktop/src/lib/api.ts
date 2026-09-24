@@ -75,6 +75,8 @@ export interface Account {
   safetyMode: SafetyMode
   ollamaModel?: string
   ollamaValidated: boolean
+  /** KI-Hauptschalter: aus = nur Regeln/Lernfilter; an = Ollama wird mitgenutzt und von der App gestartet. */
+  aiEnabled: boolean
   enabled: boolean
   dryRun: boolean
   // Wöchentlicher KI-Tiefscan: Zeitplan in lokaler Zeit (0=Sonntag..6=Samstag).
@@ -159,6 +161,37 @@ export function accounts(): Promise<Account[]> {
 
 export function models(): Promise<string[]> {
   return agentRequest<string[]>("GET", "/v1/models")
+}
+
+/**
+ * Stellt sicher, dass Ollama läuft: erst erreichbarkeits-Check über den
+ * Agenten, bei Bedarf Start über den nativen Tauri-Befehl (Windows:
+ * `ollama serve`, Fallback Desktop-App) und danach bis zu ~12 s Geduld.
+ * Liefert true, wenn Ollama anschließend erreichbar ist.
+ */
+export async function ensureOllamaRunning(): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await models()
+    return true
+  } catch {
+    // Ollama läuft nicht – unten wird der Start versucht.
+  }
+  try {
+    await invoke("start_ollama")
+  } catch {
+    return false
+  }
+  for (let attempt = 0; attempt < 12; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      await models()
+      return true
+    } catch {
+      // weiter warten
+    }
+  }
+  return false
 }
 
 export interface RecommendedModel {

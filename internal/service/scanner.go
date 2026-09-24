@@ -505,7 +505,7 @@ func (s *Scanner) sweepSpamFolder(ctx context.Context, account domain.AccountCon
 // incremental/new-mail scans only the ambiguous band is sent, keeping live
 // detection fast and the machine free.
 func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool, modelErr *error) bool {
-	if !account.OllamaValidated || account.OllamaModel == "" {
+	if !account.AIEnabled || !account.OllamaValidated || account.OllamaModel == "" {
 		return false
 	}
 	if classification.Score >= 0.98 {

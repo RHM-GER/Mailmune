@@ -50,7 +50,7 @@
     },
     "Account": {
       "type": "object",
-      "required": ["id", "name", "host", "port", "username", "secretRef", "inboxFolder", "sentFolder", "spamFolder", "safetyMode", "ollamaValidated", "enabled", "dryRun", "deepScan", "deepScanWeekday", "deepScanHour", "createdAt", "updatedAt", "profile"],
+      "required": ["id", "name", "host", "port", "username", "secretRef", "inboxFolder", "sentFolder", "spamFolder", "safetyMode", "ollamaValidated", "aiEnabled", "enabled", "dryRun", "deepScan", "deepScanWeekday", "deepScanHour", "createdAt", "updatedAt", "profile"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
@@ -64,6 +64,7 @@
         "safetyMode": { "$ref": "#/$defs/SafetyMode" },
         "ollamaModel": { "type": "string" },
         "ollamaValidated": { "type": "boolean" },
+        "aiEnabled": { "type": "boolean", "description": "KI-Hauptschalter des Postfachs: Aus = nur Regeln/Lernfilter, An = das validierte lokale Modell prueft mit und die Desktop-App haelt Ollama am Laufen." },
         "enabled": { "type": "boolean" },
         "dryRun": { "type": "boolean", "description": "Neue Konten sind immer true; automatische Aktionen erfordern eine spätere ausdrückliche Änderung." },
         "deepScan": { "type": "boolean", "description": "Aktiviert den wöchentlichen KI-Tiefscan; ohne dieses Flag sind Wochentag/Stunde bedeutungslos." },

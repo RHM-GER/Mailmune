@@ -245,6 +245,16 @@ var migrations = []migration{
 )`,
 		},
 	},
+	{
+		id:   10,
+		name: "account_ai_enabled",
+		stmts: []string{
+			// KI-Hauptschalter pro Postfach. Default AN erhält das Verhalten
+			// bestehender Installationen (validiertes Modell = KI prüft mit);
+			// ohne validiertes Modell bleibt der Schalter wirkungslos.
+			`ALTER TABLE accounts ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 1`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

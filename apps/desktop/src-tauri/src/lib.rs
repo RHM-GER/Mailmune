@@ -35,6 +35,54 @@ struct AgentHandshake {
     token: String,
 }
 
+// start_ollama startet den lokalen Ollama-Dienst, falls er nicht läuft.
+// Windows: zuerst `ollama serve` aus dem PATH, sonst die Desktop-App unter
+// %LOCALAPPDATA%\Programs\Ollama. Der Prozess wird abgetrennt gestartet und
+// ohne Fenster ausgeführt; läuft Ollama bereits, beendet sich `serve` selbst
+// (Port belegt) – das ist harmless. Die Erreichbarkeit prüft das Frontend
+// anschließend über den Agenten.
+#[tauri::command]
+async fn start_ollama() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        match std::process::Command::new("ollama")
+            .arg("serve")
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+        {
+            Ok(_) => return Ok("ollama serve gestartet".into()),
+            Err(first) => {
+                if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                    let app = std::path::Path::new(&local)
+                        .join("Programs")
+                        .join("Ollama")
+                        .join("ollama app.exe");
+                    if app.exists() {
+                        if std::process::Command::new(&app)
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .spawn()
+                            .is_ok()
+                        {
+                            return Ok("Ollama-App gestartet".into());
+                        }
+                    }
+                }
+                return Err(format!("Ollama konnte nicht gestartet werden: {first}"));
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("ollama")
+            .arg("serve")
+            .spawn()
+            .map(|_| "ollama serve gestartet".to_string())
+            .map_err(|error| error.to_string())
+    }
+}
+
 #[tauri::command]
 async fn agent_request(
     runtime: tauri::State<'_, Arc<AgentRuntime>>,
@@ -332,7 +380,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![agent_request])
+        .invoke_handler(tauri::generate_handler![agent_request, start_ollama])
         .run(tauri::generate_context!())
         .expect("Mailmune konnte nicht gestartet werden");
 }

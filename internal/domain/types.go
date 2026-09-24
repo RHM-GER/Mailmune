@@ -33,6 +33,10 @@ type AccountConfig struct {
 	SafetyMode      SafetyMode     `json:"safetyMode"`
 	OllamaModel     string         `json:"ollamaModel,omitempty"`
 	OllamaValidated bool           `json:"ollamaValidated"`
+	// AIEnabled ist der Hauptschalter der KI-Filterung pro Postfach: Aus =
+	// ausschließlich Regeln/Lernfilter, An = das validierte lokale Modell
+	// prüft mit (und die Desktop-App hält Ollama am Laufen).
+	AIEnabled       bool           `json:"aiEnabled"`
 	Enabled         bool           `json:"enabled"`
 	DryRun          bool           `json:"dryRun"`
 	// DeepScan enables the weekly AI deep scan; DeepScanWeekday/DeepScanHour

@@ -38,23 +38,23 @@ func (s *SQLite) UpsertAccount(ctx context.Context, account domain.AccountConfig
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO accounts
-(id,name,host,port,username,secret_ref,inbox_folder,sent_folder,spam_folder,safety_mode,ollama_model,ollama_validated,enabled,dry_run,profile_json,last_scan_at,created_at,updated_at,deep_scan_enabled,deep_scan_weekday,deep_scan_hour,last_deep_scan_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+(id,name,host,port,username,secret_ref,inbox_folder,sent_folder,spam_folder,safety_mode,ollama_model,ollama_validated,ai_enabled,enabled,dry_run,profile_json,last_scan_at,created_at,updated_at,deep_scan_enabled,deep_scan_weekday,deep_scan_hour,last_deep_scan_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name,host=excluded.host,port=excluded.port,username=excluded.username,
 secret_ref=excluded.secret_ref,inbox_folder=excluded.inbox_folder,sent_folder=excluded.sent_folder,spam_folder=excluded.spam_folder,
-safety_mode=excluded.safety_mode,ollama_model=excluded.ollama_model,ollama_validated=excluded.ollama_validated,
+safety_mode=excluded.safety_mode,ollama_model=excluded.ollama_model,ollama_validated=excluded.ollama_validated,ai_enabled=excluded.ai_enabled,
 enabled=excluded.enabled,dry_run=excluded.dry_run,profile_json=excluded.profile_json,last_scan_at=excluded.last_scan_at,updated_at=excluded.updated_at,
 deep_scan_enabled=excluded.deep_scan_enabled,deep_scan_weekday=excluded.deep_scan_weekday,deep_scan_hour=excluded.deep_scan_hour,last_deep_scan_at=excluded.last_deep_scan_at`,
 		account.ID, account.Name, account.Host, account.Port, account.Username, account.SecretRef,
 		account.InboxFolder, account.SentFolder, account.SpamFolder, account.SafetyMode, account.OllamaModel,
-		account.OllamaValidated, account.Enabled, account.DryRun, string(profile), nullableTime(account.LastScanAt),
+		account.OllamaValidated, account.AIEnabled, account.Enabled, account.DryRun, string(profile), nullableTime(account.LastScanAt),
 		formatTime(account.CreatedAt), formatTime(account.UpdatedAt), account.DeepScan, account.DeepScanWeekday, account.DeepScanHour, nullableTime(account.LastDeepScanAt))
 	return err
 }
 
 func (s *SQLite) ListAccounts(ctx context.Context) ([]domain.AccountConfig, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,name,host,port,username,secret_ref,inbox_folder,sent_folder,spam_folder,
-safety_mode,ollama_model,ollama_validated,enabled,dry_run,profile_json,last_scan_at,created_at,updated_at,
+safety_mode,ollama_model,ollama_validated,ai_enabled,enabled,dry_run,profile_json,last_scan_at,created_at,updated_at,
 deep_scan_enabled,deep_scan_weekday,deep_scan_hour,last_deep_scan_at FROM accounts ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ deep_scan_enabled,deep_scan_weekday,deep_scan_hour,last_deep_scan_at FROM accoun
 		var last, lastDeep sql.NullString
 		var created, updated string
 		if err := rows.Scan(&a.ID, &a.Name, &a.Host, &a.Port, &a.Username, &a.SecretRef, &a.InboxFolder, &a.SentFolder, &a.SpamFolder,
-			&a.SafetyMode, &a.OllamaModel, &a.OllamaValidated, &a.Enabled, &a.DryRun, &profile, &last, &created, &updated,
+			&a.SafetyMode, &a.OllamaModel, &a.OllamaValidated, &a.AIEnabled, &a.Enabled, &a.DryRun, &profile, &last, &created, &updated,
 			&a.DeepScan, &a.DeepScanWeekday, &a.DeepScanHour, &lastDeep); err != nil {
 			return nil, err
 		}
