@@ -178,8 +178,8 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification)
 
 **Filter & Tabelle (Review)**
-- [ ] Score-Range-Slider an Einstellungen angleichen (1:1): gleiche Optik; Von/Bis-Zahlen unten links/rechts ganz außen; Thumb-Indikator exakt wie Settings-Slider (dort nur rechts, da Single-Thumb)
-- [ ] Score-Filter: Dialog beim Klick öffnen (wie Datum) statt Inline-Aufklappen; im Dialog oben links Beschriftung, oben rechts Prozent-Indikator (wie Einstellungen)
+- [x] Score-Range-Slider an Einstellungen angeglichen (1:1): Thumb-Balken wie Settings-Slider (kleiner heller Balken, breitere unsichtbare Trefferfläche), Von/Bis-Zahlen unten links/rechts ganz außen
+- [x] Score-Filter öffnet Dialog beim Klick (wie Datum) statt Inline-Aufklappen; oben links Beschriftung, oben rechts Prozent-Indikator; Übernahme per „Anwenden“
 - [x] Einheitlicher Hover für Filter/Score/Refresh: nur leicht heller (hover:bg-white/[0.08]), Search bleibt Input-Fokus-Stil
 - [x] Datumsfilter: greift jetzt sofort nach einmal „Anwenden“ (Close-Handler setzte den frischen Zeitraum zurück); Reset löscht auch das gespeicherte alte Datum
 - [x] Filterzustand persistent: Diagramm-Zeitraum standardmäßig „Gesamt“ und gespeichert; Review-Filter/Zeitraum/Score were bereits je Ansicht persistiert

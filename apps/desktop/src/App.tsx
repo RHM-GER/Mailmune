@@ -632,15 +632,37 @@ function DualRangeSlider({ min, max, onChange }: { min: number; max: number; onC
     window.addEventListener("pointerup", stop)
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop) }
   }, [dragging, min, max, onChange])
-  const thumb = "absolute top-1/2 z-10 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#4d4d4d] ring-1 ring-white/25 transition-colors hover:bg-[#5c5c5c]"
+  // Thumbs 1:1 wie der Einstellungs-Slider: kleiner heller Balken an der
+  // Füllkante (dort nur rechts, da Single-Value), hier links und rechts.
+  // Unsichtbare breitere Trefferfläche via before-Pseudo für brauchbares Ziehen.
+  const thumb = "absolute top-1/2 z-10 h-5 w-1 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#242424] before:absolute before:-inset-x-2.5 before:-inset-y-2"
   return (
-    <div ref={trackRef} className="relative h-12 w-full select-none rounded-[10px] border border-white/10 bg-[#242424]">
+    <div ref={trackRef} className="relative h-12 w-full select-none rounded-[10px] border border-white/10 bg-[#242424] p-1">
       <div className="pointer-events-none absolute inset-y-3 left-4 right-4 opacity-70" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,.055) 0 4px, transparent 4px 14px)" }} />
       <div className="pointer-events-none absolute inset-y-1 rounded-lg bg-[#171717]" style={{ left: `${min}%`, width: `${Math.max(max - min, 0)}%` }} />
       <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `${min}%` }} />
       <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `${max}%` }} />
     </div>
   )
+}
+
+// ScoreRangeDialog ist das Score-Pendant zum Datumsfilter: gleicher Dialog-
+// Aufbau (Beschriftung oben links, Wertanzeige oben rechts), Von/Bis-Zahlen
+// unten außen. Übernahme erst per „Anwenden“.
+function ScoreRangeDialog({ open, onOpenChange, initial, onApply }: { open: boolean; onOpenChange: (open: boolean) => void; initial: { min: number; max: number }; onApply: (range: { min: number; max: number }) => void }) {
+  const [draft, setDraft] = useState(initial)
+  useEffect(() => { if (open) setDraft(initial) }, [open, initial])
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[440px]">
+      <DialogHeader><DialogTitle>Score-Bereich</DialogTitle><DialogDescription>Nur Nachrichten innerhalb dieses Score-Bereichs in der Tabelle anzeigen.</DialogDescription></DialogHeader>
+      <div className="py-2">
+        <div className="mb-3 flex items-baseline justify-between"><span className="text-sm text-[#ccc]">Score von/bis</span><span className="font-mono text-sm text-white tabular-nums">{draft.min}–{draft.max} %</span></div>
+        <DualRangeSlider min={draft.min} max={draft.max} onChange={(min, max) => setDraft({ min, max })} />
+        <div className="mt-2 flex justify-between font-mono text-xs text-[#888] tabular-nums"><span>{draft.min} %</span><span>{draft.max} %</span></div>
+      </div>
+      <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button onClick={() => onApply(draft)}>Anwenden</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decisions: Decision[]; refresh: () => void; agentOnline: boolean; onCheckMail?: () => void }) {
@@ -725,7 +747,8 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
           <FilterToolbarButton active={filtersActive} open={filterOpen} count={filtered.length} onToggle={() => setFilterOpen((current) => !current)} onReset={resetFilters} />
           {filterOpen && view === "review" && <><ToolbarConnector /><Select value={reviewFilter} onValueChange={(value) => { setSelected([]); setReviewFilter(value as "review" | "rejected") }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${reviewFilter !== "review" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{reviewFilter === "review" ? "Review" : "Kein Spam"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="review">Review</SelectItem><SelectItem value="rejected">Kein Spam</SelectItem></SelectContent></Select></>}
           {filterOpen && <><ToolbarConnector /><Select value={range} onValueChange={(value) => { if (value === "custom") { setRange("custom"); setCustomOpen(true) } else { setSelected([]); setRange(value as Range) } }}><SelectTrigger className={`h-[52px]! min-w-[148px] shrink-0 rounded-md px-3.5 text-sm! ${range !== "all" ? "border-white! bg-white! text-[#171717]! hover:bg-white/90! [&_svg]:text-[#171717]!" : "border-white/10 bg-white/[0.05] text-[#aaa]"}`}><SelectValue>{({ week: "Woche", month: "Monat", year: "Jahr", all: "Alles", custom: "Benutzerdefiniert" } as const)[range]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="week">Woche</SelectItem><SelectItem value="month">Monat</SelectItem><SelectItem value="year">Jahr</SelectItem><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent></Select></>}
-          {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen((open) => !open)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:bg-white/[0.08] hover:text-white"}`}><Gauge className="size-4" />Score<span className="inline-block min-w-[64px] font-mono text-xs tabular-nums opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
+          {filterOpen && <><ToolbarConnector /><button onClick={() => setScoreOpen(true)} className={`flex h-[52px] shrink-0 items-center gap-2 rounded-md border px-3.5 text-sm transition-colors ${scoreFilterActive || scoreOpen ? "border-white! bg-white! text-[#171717]! hover:bg-white/90" : "border-white/10 bg-white/[0.05] text-[#aaa] hover:bg-white/[0.08] hover:text-white"}`}><Gauge className="size-4" />Score<span className="inline-block min-w-[64px] font-mono text-xs tabular-nums opacity-70">{scoreRange.min}–{scoreRange.max}%</span></button></>}
+          <ScoreRangeDialog open={scoreOpen} onOpenChange={setScoreOpen} initial={scoreRange} onApply={(picked) => { setSelected([]); setScoreRange(picked); setScoreOpen(false) }} />
           {range === "custom" && <button onClick={() => setCustomOpen(true)} className="ml-2 flex h-[52px] shrink-0 items-center gap-2 rounded-md border border-white! bg-white! px-3.5 text-sm text-[#171717]! transition-colors hover:bg-white/90"><CalendarDays className="size-4" />{customRange ? `${formatShortDate(customRange.from)} – ${formatShortDate(customRange.to)}` : "Zeitraum wählen"}</button>}
           <DateRangeDialog open={customOpen} onOpenChange={(next) => { setCustomOpen(next); if (!next) { if (customApplied.current) { customApplied.current = false; return } if (!customRange && range === "custom") setRange("all") } }} initial={customRange} onApply={(picked) => { customApplied.current = true; setCustomRange(picked); setRange("custom"); setSelected([]) }} />
           {/* Nachrichtendetails: vollständige Reason-Codes der Entscheidung.
@@ -750,7 +773,6 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
           </Dialog>
         </div>
       </div><ScrollFade strength={toolbarFade} direction="horizontal" compact targetRef={toolbarScrollRef} /></div>
-      {scoreOpen && <div className="mt-3 flex items-center gap-4 rounded-[10px] border border-white/10 bg-[#1b1b1b] px-4 py-3"><span className="shrink-0 text-xs text-[#888]">Score von/bis</span><div className="max-w-md flex-1"><DualRangeSlider min={scoreRange.min} max={scoreRange.max} onChange={(min, max) => { setSelected([]); setScoreRange({ min, max }) }} /></div><span className="shrink-0 font-mono text-xs text-[#ccc]">{scoreRange.min}–{scoreRange.max}%</span></div>}
       <div className="relative mt-6 min-h-0 flex-1">
         <div ref={tableScrollRef} className="h-full overflow-auto overscroll-contain [scrollbar-gutter:stable]">
           <div className="min-w-[1224px]">
