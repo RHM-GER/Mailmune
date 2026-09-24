@@ -1279,6 +1279,10 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [status, setStatus] = useState("")
   const [busy, setBusy] = useState(false)
   const [ollamaError, setOllamaError] = useState("")
+  // Modellwechsel-Warnung: ersetzt ein bereits validiertes, genutztes Modell,
+  // muss das erst bestätigt werden (Fähigkeitstest verfällt, Bewertungen
+  // können inkonsistent werden).
+  const [pendingTag, setPendingTag] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1317,7 +1321,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     return <EmptyConnectionCard text="Zuerst ein Postfach verbinden; das KI-Modell wird pro Postfach aktiviert." />
   }
 
-  const choose = async (tag: string) => {
+  const applyModel = async (tag: string) => {
     setSelected(tag)
     setBusy(true)
     setStatus("Modell wird übernommen …")
@@ -1330,6 +1334,15 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     } finally {
       setBusy(false)
     }
+  }
+
+  const choose = (tag: string) => {
+    // Nur warnen, wenn ein validiertes Modell im Einsatz war und ersetzt wird.
+    if (account.ollamaValidated && account.ollamaModel && account.ollamaModel !== tag) {
+      setPendingTag(tag)
+      return
+    }
+    void applyModel(tag)
   }
 
   const validate = async () => {
@@ -1376,7 +1389,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     <div className="flex items-center gap-3">
       <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Bot className="size-4" /></div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{validated ? account.ollamaModel : selected || "Kein Modell gewählt"}</p>
+        <p className="flex items-center gap-1.5 truncate text-sm font-medium">{validated ? account.ollamaModel : selected || "Kein Modell gewählt"}<InfoTooltip><p>Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p></InfoTooltip></p>
         <p className="mt-1 truncate text-xs text-[#666]">{validated ? "Ollama · lokal validiert" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · nicht verbunden"}</p>
       </div>
       {validated && <Badge className="shrink-0 border-white/10 bg-white/[0.06] text-[#d6d6d6]">aktiv</Badge>}
@@ -1386,7 +1399,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
 
     <div className="mt-3 space-y-2">
       <Label htmlFor="model-select">Modell wählen</Label>
-      <Select value={selected} onValueChange={(value) => { if (value) void choose(value) }} disabled={busy}>
+      <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
         <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
           <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
         </SelectTrigger>
@@ -1401,7 +1414,13 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
     </div>
     {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
-    <p className="mt-3 text-xs leading-5 text-[#666]">Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p>
+    {/* Modellwechsel-Warnung: ersetzt ein validiertes Modell, das im Einsatz war. */}
+    <Dialog open={Boolean(pendingTag)} onOpenChange={(open) => { if (!open) setPendingTag(null) }}>
+      <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[440px]">
+        <DialogHeader><DialogTitle>KI-Modell wechseln?</DialogTitle><DialogDescription>„{account.ollamaModel}“ ist validiert und im Einsatz. Beim Wechsel wird die Validierung zurückgesetzt und der Fähigkeitstest muss für das neue Modell erneut laufen. Bisherige KI-Bewertungen stammen vom alten Modell – Scores können bis zum nächsten Scan inkonsistent wirken. Bestätigte Reviews und Lernwissen bleiben erhalten.</DialogDescription></DialogHeader>
+        <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => setPendingTag(null)}>Abbrechen</Button><Button onClick={() => { const tag = pendingTag; setPendingTag(null); if (tag) void applyModel(tag) }}>Modell wechseln</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 }
 

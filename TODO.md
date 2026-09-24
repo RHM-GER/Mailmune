@@ -192,12 +192,12 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Refresh-Button löst zusätzlich eine inkrementelle „Neue Mails?“-Prüfung des aktiven Profils aus; der vorhandene Scan-Toast zeigt den Lauf
 
 **Einstellungen & KI-Modell**
-- [ ] Modellwechsel: Speichern/Abbrechen-Warndialog, wenn bereits ein validiertes Modell genutzt wurde (Fortschritt/Konsistenz der KI-Ergebnisse)
+- [x] Modellwechsel: Speichern/Abbrechen-Warndialog, wenn ein validiertes Modell ersetzt wird (Validierung verfällt, Scores können bis zum Rescan inkonsistent wirken; Reviews/Lernwissen bleiben)
 - [x] „Erneut validieren" zurücgebaut: nur noch dezenter Ghost-Button im KI-Modell-Bereich, wenn bereits validiert; „Fähigkeitstest“ bleibt prominent
 - [x] „Aktiv“-Badge beim KI-Modell neutral statt grün; auch „Automatik freigeschaltet“-Hinweis neutral – Farbe bleibt Sonderfällen (z. B. Success-Toast) vorbehalten
 - [x] Wochenprüfung: Settings-Panel klappt beim Ausschalten wieder ein
 - [ ] Lern-/Profiltransfer-Dialog: Export-Button (für anderen Rechner exportieren/weitergeben)
-- [ ] UI-Texte reduzieren: Erklärtexte in Tooltips/Dialoge verschieben, z. B. „Lokales Lernen aus bestätigten Reviews…", „Automatische Verschiebung – Noch keine bestätigten Entscheidungen…", „Ein KI-Ergebnis allein verschiebt niemals eine Mail…"
+- [ ] UI-Texte reduzieren: Erklärtexte in Tooltips/Dialoge verschieben – erledigt bisher: „Ein KI-Ergebnis allein verschiebt niemals…“ (jetzt InfoTooltip am Modellnamen); offen: „Lokales Lernen aus bestätigten Reviews…“, „Automatische Verschiebung – Noch keine bestätigten Entscheidungen…“
 - [ ] Verbindungs-Aktionsbuttons (Verbindung testen/prüfen/neu) gehören in die Settings des Mailprofils
 - [ ] Automatischer-Verschiebung-Hinweis redundant zum Spamverhalten-Slider (Autonom) – entfernen/konsolidieren
 
