@@ -1,6 +1,8 @@
 .tools/
 bin/
 data/
+# Versionierte Klassifizierer-Daten (CC0 Wikidata-Exporte, via go:embed)
+!internal/classifier/data/
 *.db
 *.db-shm
 *.db-wal
