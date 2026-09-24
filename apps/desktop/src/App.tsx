@@ -1348,12 +1348,18 @@ function TransferPlaceholder({ kind, accountId }: { kind: "learning" | "profile"
   return <><Tooltip><TooltipTrigger render={<Button size="sm" variant="outline" onClick={() => setOpen(true)}>{learning ? "Lerntransfer" : "Profiltransfer"}</Button>} /><TooltipContent side="top">{learning ? "Anonymisierte Lernmerkmale übertragen" : "Vollständiges Lernprofil übertragen"}</TooltipContent></Tooltip><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]"><DialogHeader><DialogTitle>{learning ? "Lerndaten übertragen" : "Profil übertragen"}</DialogTitle><DialogDescription>{learning ? "Überträgt ausschließlich allgemeine, anonymisierte Lernmerkmale ohne Nachrichtentexte oder personenbezogene Daten." : "Überträgt Regeln, Präferenzen und postfachspezifische Lernmerkmale in ein anderes Profil."}</DialogDescription></DialogHeader><div className="space-y-3 py-2"><Label htmlFor={`${kind}-target`}>Zielprofil</Label><Input id={`${kind}-target`} className="h-12 px-3.5" placeholder="Profile durchsuchen" /><div className="rounded-[10px] border border-dashed border-white/10 px-4 py-5 text-center text-xs text-[#666]">Die direkte Profilauswahl und Übertragung werden später angebunden. „Exportieren“ erstellt eine portable Datei für einen anderen Rechner.</div></div><DialogFooter><Button variant="outline" disabled={busy || !accountId} onClick={() => void exportData()}>{busy ? "Exportiere…" : "Exportieren"}</Button><Button variant="outline" onClick={() => setOpen(false)}>Schließen</Button></DialogFooter></DialogContent></Dialog></>
 }
 
-// Postfach-Einstellungen: Name, Ordner und die Aktionen (Verbindung testen /
-// Jetzt prüfen / Neu prüfen) sind hier gebündelt statt auf der Karte. Das
-// Passwort bleibt unverändert im OS-Schlüsselbund – Speichern ohne Passwort
-// lässt es serverseitig unangetastet.
+// Postfach-Einstellungen: derselbe Umfang wie die Einrichtung, nachträglich
+// anpassbar – organisiert in Bereichen (Verbindung / KI-Profil / Verhalten).
+// Speichern ohne Passwort lässt den Schlüsselbund-Eintrag unangetastet;
+// geänderte Zugangsdaten prüft der Server gegen bereits verbundene Postfächer
+// (Identitätscheck host+username), damit kein Doppel-Profil entsteht.
+const mailTypePresets = ["Kundenanfragen", "Lieferanten", "Newsletter", "Automatische Kontomails"]
+
 function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction, status }: { account: Account; open: boolean; onOpenChange: (open: boolean) => void; refresh: () => void; onAction: (action: "test" | "scan" | "resync") => void; status?: string }) {
+  const [tab, setTab] = useState("connection")
   const [draft, setDraft] = useState(account)
+  const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   // KI-Profilmodell: Kompilat-Status (aktiv/veraltet/fehlt) + Generator.
@@ -1363,15 +1369,39 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
   // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
   // Eingaben mitten im Tippen überschreiben.
-  useEffect(() => { if (open) { setDraft({ ...account, profile: { ...account.profile, context: account.profile.context ?? "" } }); setError("") } }, [open, account.id])
+  useEffect(() => {
+    if (!open) return
+    setTab("connection")
+    setPassword("")
+    setShowPassword(false)
+    setError("")
+    setCompileError("")
+    setDraft({ ...account, profile: { ...account.profile, context: account.profile.context ?? "", unexpected: account.profile.unexpected ?? "" } })
+  }, [open, account.id])
   useEffect(() => {
     if (!open) return
     let cancelled = false
     getProfileModel(account.id).then((result) => { if (!cancelled) setProfileState(result) }).catch(() => { if (!cancelled) setProfileState(null) })
     return () => { cancelled = true }
   }, [open, account.id])
+  const credentialsChanged = draft.host !== account.host || draft.port !== account.port || draft.username !== account.username
+  const save = async () => {
+    setSaving(true)
+    setError("")
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: draft, ...(password ? { password } : {}) })
+      setPassword("")
+      await refresh()
+      onOpenChange(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setSaving(false)
+    }
+  }
   // Generieren speichert zuerst den Profiltext (die Kompilierung arbeitet
-  // serverseitig auf dem gespeicherten Profil), dann kompiliert die KI neu.
+  // serverseitig auf dem gespeicherten Profil), dann leitet die KI daraus
+  // Indikatoren und Prompt neu ab.
   const generate = async () => {
     setCompiling(true)
     setCompileError("")
@@ -1394,22 +1424,29 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
       // UI-Zustand bleibt unverändert; der nächste Dialog-Aufruf lädt neu.
     }
   }
-  const save = async () => {
-    setSaving(true)
-    setError("")
-    try {
-      await agentRequest("POST", "/v1/accounts", { account: draft })
-      await refresh()
-      onOpenChange(false)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setSaving(false)
-    }
+  const toggleMailType = (preset: string) => {
+    const has = draft.profile.expectedMailTypes.includes(preset)
+    setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: has ? draft.profile.expectedMailTypes.filter((value) => value !== preset) : [...draft.profile.expectedMailTypes, preset] } })
   }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[560px]"><DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle><DialogDescription>Name und Ordner dieses Postfachs. Das Passwort bleibt im Schlüsselbund und wird hier nicht angezeigt.</DialogDescription></DialogHeader>
-    <div className="space-y-4 py-2">
-      <Field label="Anzeigename"><Input className="h-12 px-3.5" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
+    <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle><DialogDescription>Alles aus der Einrichtung ist hier anpassbar. Speichern ohne neues Passwort lässt das gespeicherte Passwort unangetastet.</DialogDescription></DialogHeader>
+    <div className="py-1">
+      <SegmentedControl ariaLabel="Einstellungsbereiche" options={[{ value: "connection", label: "Verbindung" }, { value: "profile", label: "KI-Profil" }, { value: "behavior", label: "Verhalten" }]} value={tab} onChange={(next) => { if (next) setTab(next) }} />
+    </div>
+    {tab === "connection" && <div className="space-y-4 py-2">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Anzeigename"><Input className="h-12 px-3.5" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+        <Field label="IMAP-Server"><Input className="h-12 px-3.5" value={draft.host} onChange={(event) => setDraft({ ...draft, host: event.target.value })} /></Field>
+        <Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={String(draft.port)} onChange={(event) => setDraft({ ...draft, port: Number(event.target.value.replace(/\D/g, "")) || 0 })} /></Field>
+        <Field label="Benutzername"><Input className="h-12 px-3.5" value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} /></Field>
+      </div>
+      <Field label={credentialsChanged && !password ? "Neues Passwort (bei geänderten Zugangsdaten erforderlich)" : "Passwort (leer lassen = behalten)"}>
+        <div className="relative">
+          <Input type={showPassword ? "text" : "password"} className="h-12 px-3.5 pr-11" autoComplete="new-password" placeholder="••••••••" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <button type="button" aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"} onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#777] transition-colors hover:text-white">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
+        </div>
+      </Field>
+      {credentialsChanged && <p className="rounded-md border border-[#e0a86c]/30 bg-[#e0a86c]/[0.06] px-3 py-2 text-xs leading-5 text-[#e0a86c]">Zugangsdaten geändert: Das bleibt dasselbe Profil – Lernen, Reviews und Entscheidungen bleiben erhalten. Gib das neue Passwort an; dieselbe Kombination aus Server + Benutzername darf nicht bereits als anderes Postfach verbunden sein (prüft der Server beim Speichern).</p>}
       <div className="grid grid-cols-3 gap-3">
         <Field label="Posteingang"><Input className="h-12 px-3.5" value={draft.inboxFolder} onChange={(event) => setDraft({ ...draft, inboxFolder: event.target.value })} /></Field>
         <Field label="Gesendet"><Input className="h-12 px-3.5" value={draft.sentFolder} onChange={(event) => setDraft({ ...draft, sentFolder: event.target.value })} /></Field>
@@ -1421,18 +1458,23 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
         <Button size="sm" variant="outline" onClick={() => onAction("resync")}>Neu prüfen</Button>
       </div>
       {status && <p className="text-xs leading-5 text-[#888]">{status}</p>}
-      {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
-      <div className="border-t border-white/[0.07] pt-4">
-        <div className="mb-3 flex items-center gap-2"><h3 className="text-sm font-medium">Profil für die KI</h3><InfoTooltip><p>Beschreibe, was in dieses Postfach gehört und was nicht. Die KI kompiliert daraus Erwartungsthemen und profilspezifische Fremdkampagnen für die Filter. Jederzeit änder- und neu generierbar; alles bleibt lokal.</p></InfoTooltip></div>
-        <div className="space-y-3">
-          <Field label="Zweck des Postfachs"><Textarea className="min-h-16 px-3.5 py-2.5" value={draft.profile.purpose} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, purpose: event.target.value } })} /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Branche"><Input className="h-12 px-3.5" value={draft.profile.industry} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, industry: event.target.value } })} /></Field>
-            <Field label="Erwartete Mailtypen (kommagetrennt)"><Input className="h-12 px-3.5" value={draft.profile.expectedMailTypes.join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) } })} /></Field>
-          </div>
-          <Field label="Weitere Beschreibung"><Textarea className="min-h-16 px-3.5 py-2.5" placeholder="Ungewöhnliche, aber legitime Mails – und was dieses Postfach niemals erwartet" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
-        </div>
+    </div>}
+    {tab === "profile" && <div className="space-y-4 py-2">
+      <div className="flex items-center gap-2"><p className="text-sm font-medium">Infos zum Unternehmen / Postfach</p><InfoTooltip><p>Beschreibe in ganzen Sätzen, was dieses Postfach ist und was hier eintrifft. Die KI leitet daraus AB, welche konkreten Themen, Dokumenttypen und Absenderarten erwartet werden – zum Beispiel ergibt „designt Websites" + „Kundenanfragen": Anfragen zu Websites, Briefings, Logo-Entwürfe, Druck-PDFs, CMS-Begriffe, Hosting-Rechnungen. Sie kopiert nicht nur deine Wörter.</p></InfoTooltip></div>
+      <Field label="Zweck des Postfachs"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Angebote und Rechnungen einer Design-Agentur für Websites und Logos" value={draft.profile.purpose} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, purpose: event.target.value } })} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Branche"><Input className="h-12 px-3.5" value={draft.profile.industry} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, industry: event.target.value } })} /></Field>
+        <Field label="Erwartete Sprachen"><Input className="h-12 px-3.5" value={draft.profile.languages.join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, languages: event.target.value.split(/[,;]/).map((value) => value.trim()).filter(Boolean) } })} /></Field>
       </div>
+      <Field label="Welche Mails erwartest du?">
+        <div className="flex flex-wrap gap-2">{mailTypePresets.map((preset) => { const active = draft.profile.expectedMailTypes.includes(preset); return <button key={preset} type="button" onClick={() => toggleMailType(preset)} aria-pressed={active} className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${active ? "border-white bg-white text-[#171717]" : "border-white/10 bg-white/[0.04] text-[#aaa] hover:bg-white/[0.08]"}`}>{preset}</button> })}</div>
+        <Input className="mt-2 h-12 px-3.5" placeholder="Eigene Typen, kommagetrennt" value={draft.profile.expectedMailTypes.filter((value) => !mailTypePresets.includes(value)).join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: [...mailTypePresets.filter((preset) => draft.profile.expectedMailTypes.includes(preset)), ...event.target.value.split(",").map((value) => value.trim()).filter(Boolean)] } })} />
+      </Field>
+      <Field label="Ungewöhnlich, aber legitim"><Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Newsletter von Design-Blogs, Rechnungen vom Hosting-Anbieter, Mails von Freelancern" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
+      <Field label="Was erwartest du hier NIEMALS?">
+        <p className="-mt-1 text-xs text-[#666]">Daraus leitet die KI die profilspezifischen Fremdkampagnen ab, die der Filter ausschließen soll.</p>
+        <Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Potenzmittel, Kaltakquise von Agenturen" value={draft.profile.unexpected} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, unexpected: event.target.value } })} />
+      </Field>
       <div className="rounded-[10px] border border-white/[0.07] bg-white/[0.02] p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -1449,15 +1491,21 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
             {profileState.model.indicators.notes && <p>{profileState.model.indicators.notes}</p>}
             <div className="flex flex-wrap gap-1.5">{(profileState.model.indicators.expectedTopics ?? []).map((topic) => <span key={topic} className="rounded-md border border-white/10 px-2 py-0.5 text-[#9aa]">{topic}</span>)}</div>
             {(profileState.model.indicators.unexpectedTopics ?? []).map((group) => <p key={group.name}><span className="text-[#e0a86c]">{group.name}:</span> {group.terms.join(", ")}</p>)}
-            <p className="text-[#666]">Kompiliert am {new Date(profileState.model.compiledAt).toLocaleString("de-DE")} mit {profileState.model.model}. Prompt und Indikatoren liegen lokal in der Datenbank; „Speichern“ des Profiltexts markiert sie als veraltet, bis du neu generierst.</p>
+            <p className="text-[#666]">Kompiliert am {new Date(profileState.model.compiledAt).toLocaleString("de-DE")} mit {profileState.model.model}. Prompt und Indikatoren liegen lokal in der Datenbank; Profiländerungen markieren sie als veraltet, bis du neu generierst.</p>
             {compileError && <p className="text-[#e07a5f]">{compileError}</p>}
           </div>
         ) : (
           <p className="mt-2 text-xs leading-5 text-[#666]">{compileError || "Noch nicht kompiliert – benötigt ein validiertes KI-Modell (siehe KI-Modelle oben)."}</p>
         )}
       </div>
-    </div>
-    <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim()} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
+    </div>}
+    {tab === "behavior" && <div className="py-2">
+      <p className="mb-1 text-sm font-medium">Automatische Verschiebung & Lernen</p>
+      <p className="mb-1 text-xs leading-5 text-[#777]">Änderungen hier wirken sofort auf dieses Postfach – kein Speichern nötig.</p>
+      <AutomationPanel account={account} refresh={refresh} />
+    </div>}
+    {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
+    <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim() || !draft.host.trim() || !draft.username.trim() || (credentialsChanged && !password)} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
   </DialogContent></Dialog>
 }
 
@@ -1718,14 +1766,14 @@ function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hi
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [preferences, setPreferences] = useState({ customers: true, suppliers: true, newsletters: true, automatedAccounts: true })
-  const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "" })
+  const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "", unexpected: "" })
   const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
+  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, unexpected: form.unexpected, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}
-    {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field></div>}
+    {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field><Field label="Was erwartest du hier NIEMALS? (optional)"><p className="-mt-1 text-xs text-[#666]">Die KI leitet daraus ab, welche Werbekampagnen für dieses Postfach grundsätzlich fremd sind – je konkreter, desto besser.</p><Textarea className="min-h-20 px-3.5 py-3" placeholder={'Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Kaltakquise von Agenturen'} value={form.unexpected} onChange={(e) => setForm({...form,unexpected:e.target.value})} /></Field></div>}
     {step === 3 && <div className="space-y-4"><div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><p className="text-sm font-medium">{form.name || "Postfach"}</p><p className="mt-1 text-xs text-[#666]">{form.username} · {form.host}:{form.port}</p></div><div className="grid grid-cols-2 gap-3 text-xs"><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Profil</p><p className="mt-2 leading-5">{form.industry || "Keine Branche"}<br />{form.languages || "Keine Sprache"}</p></div><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Whitelist</p><p className="mt-2 leading-5">{trustedSenders.length} bestätigte Absender</p></div></div><p className="text-xs leading-5 text-[#666]">Nach dem Verbinden wird ausschließlich lesend geprüft. Automatische Verschiebungen bleiben deaktiviert, bis der Trockenlauf bestätigt wurde.</p>{error && <p role="alert" className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{error}</p>}</div>}
   </div><DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => step === 0 ? setOpen(false) : setStep((current) => current - 1)}>{step === 0 ? "Abbrechen" : "Zurück"}</Button>{step < steps.length - 1 ? <Button disabled={step === 0 && (!form.host || !form.username || !form.password)} onClick={() => setStep((current) => current + 1)}>Weiter</Button> : <Button disabled={saving} onClick={() => void save()}>{saving ? "Verbindet …" : "Sicher verbinden"}</Button>}</DialogFooter></DialogContent></Dialog>
 }

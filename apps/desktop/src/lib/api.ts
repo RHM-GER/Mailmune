@@ -88,6 +88,8 @@ export interface Account {
     industry: string
     /** Freitext des Besitzers: ungewöhnliche, aber legitime Mails, Besonderheiten. */
     context: string
+    /** Klartext: was dieses Postfach NIEMALS erwartet (Quelle der KI-Fremdkampagnen). */
+    unexpected: string
     languages: string[]
     expectedMailTypes: string[]
     trustedDomains: string[]

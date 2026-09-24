@@ -17,14 +17,18 @@ import (
 // begrenztes Indikator-Set für die deterministischen Regeln. Die Ausgabe wird
 // vollständig validiert; kein Teil davon wird als Instruktion vertraut.
 const compileInstruction = `You compile a mailbox profile into configuration for a local spam filter.
-The profile describes what legitimate mail for this mailbox looks like (business, purpose, expected mail types, free-text notes from the owner).
-Derive from it, in German:
-1. "prompt": one short paragraph (max 800 chars) for an email classifier describing this mailbox: which topics/senders are expected here and which content is clearly foreign.
-2. "expectedTopics": 6-24 short literal words or phrases (2-40 chars) that typically appear in LEGITIMATE mail of this profile.
-3. "unexpectedTopics": up to 8 mass-mailing campaign categories this profile would never legitimately receive, each with a "name" and 3-12 literal indicator terms (2-40 chars). Think in generic campaign categories (diet products, crypto investment schemes, potency ads, sweepstakes, fake invoices, unsolicited acquisition...), tailored to what this mailbox does NOT deal with.
-4. "notes": one sentence explaining the compilation for the mailbox owner.
-Strict rules for all terms: literal substrings only (no regex, no wildcards, no punctuation tricks); generic campaign vocabulary; never person names; never the profile's own domains or partners; never single common words that legitimately appear in normal business mail. A term must be specific enough that a hit is strong evidence of a foreign campaign.
-Respond with strict JSON only: {"prompt": string, "expectedTopics": [string], "unexpectedTopics": [{"name": string, "terms": [string]}], "notes": string}`
+The profile describes the mailbox owner's business, what mail is expected, what legitimate oddities exist, and what the owner explicitly NEVER wants to receive.
+WORK BY INFERENCE - do not just copy words out of the profile:
+- From each stated business activity, derive what concrete incoming mail actually looks like: document types, project vocabulary, tools, materials, roles and sender categories. Example: "designs websites" + "expects customer inquiries" implies website requests, briefings, logos, draft reviews, print/PDF proofs, CMS/WordPress/hosting terms, deadlines, quotes, invoices, and collaborators - none of which appear literally in the profile.
+- "expectedTopics" must be this DERIVED, concrete vocabulary (nouns, compound nouns, short phrases), covering the everyday mail the owner described. Abstract profile words alone are not enough.
+- From the business type AND the owner's explicit never-expect text, derive the mass-mailing campaign categories that can never be legitimate for this mailbox (for example diet products, crypto investment schemes, potency ads, sweepstakes, fake insurer giveaways, medication offers, unsolicited coaching/agency cold mail). For each category list the concrete literal indicator terms such campaigns actually use in subject lines and bodies.
+- If the owner's never-expect text names a category explicitly (e.g. "cold acquisition"), build a dedicated group for it with terms such campaigns use (e.g. unsolicited praise of their work, offering to send something "unverbindlich", referral to state subsidies, first-contact phrasing).
+Strict rules for all terms: literal substrings only (no regex, no wildcards); generic campaign or business vocabulary; never person names; never the profile's own domains or partners; never single common words that legitimately appear in normal business mail. Every term must be specific enough that a hit is strong evidence.
+Respond in German with strict JSON only: {"prompt": string, "expectedTopics": [string], "unexpectedTopics": [{"name": string, "terms": [string]}], "notes": string}
+- "prompt": one short paragraph (max 800 chars) for an email classifier describing this mailbox: which concrete topics/senders are expected and which content is clearly foreign.
+- "expectedTopics": 10-24 derived terms (2-40 chars each).
+- "unexpectedTopics": 3-8 campaign groups, each with a name and 3-12 literal terms (2-40 chars).
+- "notes": one sentence explaining your derivation to the mailbox owner.`
 
 // CompiledProfile ist das validierte Ergebnis einer Profil-Kompilierung.
 type CompiledProfile struct {
@@ -45,6 +49,7 @@ func (o *Ollama) CompileProfile(ctx context.Context, model string, profile domai
 			"purpose":           bounded(profile.Purpose, 800),
 			"industry":          bounded(profile.Industry, 400),
 			"context":           bounded(profile.Context, 2400),
+			"neverExpected":     bounded(profile.Unexpected, 1600),
 			"expectedMailTypes": profile.ExpectedMailTypes,
 			"languages":         profile.Languages,
 		},

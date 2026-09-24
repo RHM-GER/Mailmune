@@ -23,6 +23,7 @@ func ProfileSourceHash(profile domain.MailboxProfile) string {
 		"purpose":           strings.TrimSpace(profile.Purpose),
 		"industry":          strings.TrimSpace(profile.Industry),
 		"context":           strings.TrimSpace(profile.Context),
+		"unexpected":        strings.TrimSpace(profile.Unexpected),
 		"languages":         sortedProfileCopy(profile.Languages),
 		"expectedMailTypes": sortedProfileCopy(profile.ExpectedMailTypes),
 	}
@@ -59,7 +60,7 @@ func (s *Service) CompileAccountProfile(ctx context.Context, accountID string) (
 	if !account.OllamaValidated || account.OllamaModel == "" {
 		return domain.ProfileModel{}, errors.New("für die Profil-Kompilierung ist ein validiertes lokales KI-Modell erforderlich")
 	}
-	if strings.TrimSpace(account.Profile.Purpose) == "" && strings.TrimSpace(account.Profile.Context) == "" && strings.TrimSpace(account.Profile.Industry) == "" {
+	if strings.TrimSpace(account.Profile.Purpose) == "" && strings.TrimSpace(account.Profile.Context) == "" && strings.TrimSpace(account.Profile.Industry) == "" && strings.TrimSpace(account.Profile.Unexpected) == "" {
 		return domain.ProfileModel{}, errors.New("das Profil ist zu leer für die Kompilierung – bitte Zweck oder Beschreibung des Postfachs angeben")
 	}
 	compiled, err := s.ollama.CompileProfile(ctx, account.OllamaModel, account.Profile)

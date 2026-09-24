@@ -30,11 +30,12 @@
     },
     "MailboxProfile": {
       "type": "object",
-      "required": ["purpose", "industry", "context", "languages", "expectedMailTypes", "trustedDomains", "trustedSenders", "wantedNewsletters", "legitimateAutomated"],
+      "required": ["purpose", "industry", "context", "unexpected", "languages", "expectedMailTypes", "trustedDomains", "trustedSenders", "wantedNewsletters", "legitimateAutomated"],
       "properties": {
         "purpose": { "type": "string" },
         "industry": { "type": "string" },
         "context": { "type": "string", "description": "Freitext des Besitzers: ungewöhnliche, aber legitime Mails und Besonderheiten. Hauptquelle der KI-Profilkompilierung." },
+        "unexpected": { "type": "string", "description": "Klartext: was dieses Postfach NIEMALS erwartet. Quelle der KI-abgeleiteten Fremdkampagnen." },
         "languages": { "type": "array", "items": { "type": "string" } },
         "expectedMailTypes": { "type": "array", "items": { "type": "string" } },
         "trustedDomains": { "type": "array", "items": { "type": "string" } },

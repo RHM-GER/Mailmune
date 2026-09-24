@@ -125,14 +125,18 @@ func (s *Service) SaveAccount(ctx context.Context, request SaveAccountRequest) (
 		// Product rule: new mailboxes always begin in a reading dry run.
 		// Automation requires an explicit later change plus confirmation.
 		a.DryRun = true
-		// The same mailbox (host + username) must never be connected twice:
-		// duplicate profiles split reviews and learning, and they show up as
-		// "undeletable" doubles in the UI.
-		if existing, listErr := s.store.ListAccounts(ctx); listErr == nil {
-			for _, other := range existing {
-				if strings.EqualFold(strings.TrimSpace(other.Host), strings.TrimSpace(a.Host)) && strings.EqualFold(strings.TrimSpace(other.Username), strings.TrimSpace(a.Username)) {
-					return a, errors.New("this mailbox is already connected")
-				}
+	}
+	// Das gleiche Postfach (host + username) darf nie doppelt verbunden sein –
+	// auch nicht durch ein Update, das Zugangsdaten auf ein bereits verbundenes
+	// Postfach ändert. Duplikate splitten Reviews und Lernen und tauchen in der
+	// UI als „unlöschbare“ Doppel auf.
+	if existing, listErr := s.store.ListAccounts(ctx); listErr == nil {
+		for _, other := range existing {
+			if other.ID == a.ID {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(other.Host), strings.TrimSpace(a.Host)) && strings.EqualFold(strings.TrimSpace(other.Username), strings.TrimSpace(a.Username)) {
+				return a, errors.New("this mailbox is already connected")
 			}
 		}
 	}

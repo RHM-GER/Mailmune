@@ -59,6 +59,10 @@ type MailboxProfile struct {
 	// ungewöhnliche, aber legitime Mails, Besonderheiten des Postfachs. Er ist
 	// die Hauptquelle für die KI-Kompilierung der Profil-Indikatoren.
 	Context             string   `json:"context"`
+	// Unexpected ist der Klartext des Besitzers darüber, was in diesem Postfach
+	// NIEMALS erwartet wird (z. B. „Diät-Werbung, Krypto-Anlagen, Kaltakquise“).
+	// Die KI leitet daraus die profilspezifischen Fremdkampagnen ab.
+	Unexpected          string   `json:"unexpected"`
 	Languages           []string `json:"languages"`
 	ExpectedMailTypes   []string `json:"expectedMailTypes"`
 	TrustedDomains      []string `json:"trustedDomains"`
