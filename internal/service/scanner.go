@@ -297,6 +297,10 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		}
 	}
 
+	// modelErr sammelt den ersten KI-Ausfall dieses Laufs (z. B. Ollama nicht
+	// erreichbar); am Ende wird daraus genau eine Warnung.
+	var modelErr error
+
 	handler := func(message domain.MessageFeatures, text string) error {
 		if s.testGate != nil {
 			s.testGate()
@@ -309,7 +313,7 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		}
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
-		s.consultModel(ctx, account, message, &classification, learned, aiAll)
+		s.consultModel(ctx, account, message, &classification, learned, aiAll, &modelErr)
 		action := classifier.Decide(account.SafetyMode, classification)
 		isCandidate := action != classifier.ActionIgnore
 		// Count every arrival for the dashboard's "Eingang" series, including
@@ -410,6 +414,11 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		_ = s.store.RecordDailyStats(context.Background(), account.ID, "", scanned, result.moved, 0, 0)
 		// Arrival counters are pure metadata; keep them bounded anyway.
 		_, _ = s.store.PurgeReceivedLog(context.Background())
+		// KI konfiguriert, aber nicht erreichbar: einmalig pro Lauf warnen,
+		// damit klar ist, dass die KI-Filterung ausgefallen ist.
+		if modelErr != nil && s.hub != nil {
+			s.hub.Publish("model.unavailable", map[string]string{"accountId": account.ID, "model": account.OllamaModel, "error": redactError(modelErr)})
+		}
 		// Spam, das ein Mensch oder ein Fremdfilter einsortiert hat, wird als
 		// "Nicht erkannt"-Serie erfasst (read-only Sweep des Spam-Ordners).
 		s.sweepSpamFolder(ctx, account, password, run)
@@ -477,7 +486,7 @@ func (s *Scanner) sweepSpamFolder(ctx context.Context, account domain.AccountCon
 // so low-scoring mail the rules missed still gets a second opinion; on
 // incremental/new-mail scans only the ambiguous band is sent, keeping live
 // detection fast and the machine free.
-func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool) bool {
+func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool, modelErr *error) bool {
 	if !account.OllamaValidated || account.OllamaModel == "" {
 		return false
 	}
@@ -489,6 +498,11 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 	}
 	verdict, err := s.ollama.Classify(ctx, account.OllamaModel, message, account.Profile, learned)
 	if err != nil {
+		// Ersten Fehler pro Lauf merken: Der Scan warnt am Ende einmalig,
+		// dass die KI-Filterung ausgefallen ist (z. B. Ollama nicht gestartet).
+		if modelErr != nil && *modelErr == nil {
+			*modelErr = err
+		}
 		return false
 	}
 	classification.ModelUsed = account.OllamaModel

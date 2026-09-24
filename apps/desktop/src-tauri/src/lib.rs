@@ -66,7 +66,10 @@ async fn agent_request(
     let request = match method.as_str() {
         "GET" => client.get(url),
         "POST" => client.post(url),
-        _ => return Err("Nur GET und POST sind erlaubt".into()),
+        "PUT" => client.put(url),
+        "PATCH" => client.patch(url),
+        "DELETE" => client.delete(url),
+        _ => return Err("Nur GET, POST, PUT, PATCH und DELETE sind erlaubt".into()),
     }
     .bearer_auth(connection.token);
     let request = if let Some(value) = body {
@@ -83,7 +86,10 @@ async fn agent_request(
     serde_json::from_str(&payload).map_err(|error| format!("Ungültige Agent-Antwort: {error}"))
 }
 
-fn start_agent(app: &AppHandle, runtime: Arc<AgentRuntime>) -> Result<(), Box<dyn std::error::Error>> {
+fn start_agent(
+    app: &AppHandle,
+    runtime: Arc<AgentRuntime>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let data_directory = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_directory)?;
     let data_directory_string = data_directory.to_string_lossy().into_owned();
@@ -92,7 +98,10 @@ fn start_agent(app: &AppHandle, runtime: Arc<AgentRuntime>) -> Result<(), Box<dy
         .sidecar("spam-agent")?
         .args(["--data-dir", data_directory_string.as_str()])
         .spawn()?;
-    *runtime.child.lock().map_err(|_| "Agent-Prozessstatus ist gesperrt")? = Some(child);
+    *runtime
+        .child
+        .lock()
+        .map_err(|_| "Agent-Prozessstatus ist gesperrt")? = Some(child);
 
     let app_for_events = app.clone();
     let runtime_for_events = runtime.clone();
@@ -158,7 +167,11 @@ fn parse_sse_frame(frame: &str) -> Option<Value> {
 
 /// Streams the agent's SSE endpoint once. Returns true when a connection was
 /// established (even if it ended later), false when it could not be built.
-async fn stream_once(app: &AppHandle, runtime: &Arc<AgentRuntime>, connection: &AgentConnection) -> bool {
+async fn stream_once(
+    app: &AppHandle,
+    runtime: &Arc<AgentRuntime>,
+    connection: &AgentConnection,
+) -> bool {
     let client = match reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .build()

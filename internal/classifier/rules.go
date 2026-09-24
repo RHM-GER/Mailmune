@@ -5,6 +5,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
 )
@@ -40,6 +41,8 @@ const (
 	CodeStatisticalHam       = "statistical_ham"
 	CodeMachineGenerated     = "machine_generated_domain"
 	CodeSenderDigitPattern   = "sender_digit_pattern"
+	CodeSpamVertical         = "spam_vertical_content"
+	CodeProfileMismatch      = "profile_mismatch"
 	CodeLocalModelPrefix     = "local_model_"
 )
 
@@ -67,6 +70,19 @@ var (
 	// Sextortion/blackmail: threats to publish intimate material or to contact
 	// the victim's family. Generic wording, no brand or data lists.
 	blackmailTerms = regexp.MustCompile(`(?i)(skandal|erpress|kompromittier|video\s+wird.{0,30}(gesendet|geschickt|veröffentlicht|weitergegeben)|an\s+(ihre|deine)\s+familie|ich\s+habe\s+(dich|sie)\s+(gefilmt|aufgenommen|mitgeschnitten))`)
+	// Klassische Massen-Spam-Vertikalen: typisches Kampagnen-Vokabular der
+	// großen kommerziellen Spam-Wellen (Deutsch + Englisch). Das sind
+	// GENERISCHE Muster ganzer Industriezweige (Diät-Pillen, Krypto-Anlage,
+	// Potenz, Krankenkassen-Lockangebote, Wallet-KYC, Kaltakquise) – keine
+	// nutzerspezifischen Blocklisten. Die Formulierungen sind absichtlich
+	// kampagnentypisch gewählt (Mehrwort-Kombinationen, Anpreisungen), damit
+	// normale Fach-/Privatpost nicht zufällig trifft.
+	dietHealthTerms = regexp.MustCompile(`(?i)(bauchfett|(schnell|einfach|mühelos|leicht) abnehmen|abnehmen (ohne|leicht|schnell)|(diät|darm|detox)[- ]?(spray|gummis|gummies|pillen|kapseln|kur|diät|tropfen)|keto[- ]?gummies|ozempic|semaglutid|mounjaro|mounjaslim|glp-?1|medicare[- ]?kit|wundermittel|geheimwaffe gegen|fettverbrenn|schlank (in|ohne|werden)|wohlgefühl)`)
+	cryptoInvestTerms = regexp.MustCompile(`(?i)(bitcoin[- ]?(anlage|investment|handel|spark)?|krypto[- ]?(investment|anlage|handel)|mit krypto|crypto[- ]?(investment|trading)|day[- ]?trading|trading[- ]?(bot|system|software|plattform)|anleger (werden|erhalten|profitieren)|vermögen (aufbauen|verdoppeln|vermehren)|rendite von|250 (eur|€|dollar|usd)|einstieg verpasst|geldstress|anlageberater (ruft|meldet)|finanzielle freiheit|passives einkommen|systemtreffern|klug investieren|geld kommt täglich|mit (erfolg|system) (investieren|anlegen)|ai für sie arbeiten|gewinn(e|system) (mit|durch) (ki|ai|crypto|krypto))`)
+	potencyTerms = regexp.MustCompile(`(?i)(potenz|erektion|libido|viagra|standvermögen|ausdauernder (sex|liebhaber)|spontaner, ausdauernder|(wieder|mehr|puren?) lust|knistern|glied vergröß|(sexuell|sex) (leistung|aktiver|ausdauer)|bettnachbarin|mach sie (völlig )?sprachlos|voll auskosten|länger (durchhalten|im bett)|befriedigender sex)`)
+	insurerBaitTerms = regexp.MustCompile(`(?i)((medicare|krankenkasse|krankenversicherung|gesundheitsvorteil|zahnzusatz|bonusprogramm).{0,80}(kostenlos|gratis|geschenk|bereit|wartet|bestätigt|auswahl wurde|vorteil|kit|testen|versand))|((kostenlos testen|gratis|geschenk|ihre auswahl wurde bestätigt|wartet auf sie|bereit zum versand).{0,80}(medicare|krankenkasse|gesundheitsvorteil|zahnzusatz|kit))`)
+	walletKycTerms = regexp.MustCompile(`(?i)(kyc[- ]?(anforderung|verifizierung|prüfung|pflicht)|wallet[- ]?verifizier|(verifizieren|bestätigen) sie (ihre|jetzt ihre)? ?wallet|wallet (verifizieren|bestätigen|sichern)|(krypto|coin).{0,40}(verifizierung|kyc)|phantom[- ]?wallet)`)
+	coldAcquisitionTerms = regexp.MustCompile(`(?i)(ich habe mir.{0,40}angeschaut|hast du etwas dagegen|haben sie etwas dagegen|darf ich (es |dir |ihnen )?.{0,30}(unverbindlich )?(zusenden|zuschicken|schicken)|unverbindlich (zusenden|zuschicken|zukommen)|förderfähig (aufgesetzt|gemacht|gemeldet)|bis zu \d{1,2} prozent.{0,40}(vom staat|zurück|erstatt|förder)|kosten.{0,20}vom staat zurück)`)
 )
 
 // StatisticalScorer evaluates learned token features. The local learner
@@ -98,6 +114,7 @@ func (r *Rules) ClassifyWithFeatures(msg domain.MessageFeatures, profile domain.
 	r.stageSenderIntegrity(msg, &evidence)
 	r.stageAuthentication(msg, &evidence)
 	r.stageContent(msg, &evidence)
+	r.stageVerticals(msg, profile, &evidence)
 	r.stageLinks(msg, &evidence)
 	r.stageMailingList(msg, &evidence)
 	r.stageAttachments(msg, &evidence)
@@ -334,7 +351,12 @@ func sameBrand(first, second string) bool {
 func machineGeneratedLabel(senderDomain string) bool {
 	labels := strings.Split(strings.TrimSuffix(senderDomain, "."), ".")
 	// Ignore the TLD; analyze the remaining labels.
-	for _, label := range labels[:max(len(labels)-1, 0)] {
+	for _, rawLabel := range labels[:max(len(labels)-1, 0)] {
+		// Reine Rechtsform-Segmente (GmbH, AG, …) zählen nicht mit: Deutsche
+		// Firmendomains koppeln legitimately Wörter und Rechtsformen
+		// (mittelstand-gmbh.de ist aussprechbar und echt), während
+		// Spam-Domains ihre Zufallssegmente behalten (techniker-tkund7germany).
+		label := stripLegalFormSegments(rawLabel)
 		if len(label) < 12 {
 			continue
 		}
@@ -362,6 +384,30 @@ func machineGeneratedLabel(senderDomain string) bool {
 		}
 	}
 	return false
+}
+
+// companyLegalForms sind reine Rechtsform-/Verbindungssegmente, die vor der
+// Zufälligkeitsanalyse entfernt werden.
+var companyLegalForms = map[string]bool{}
+
+func init() {
+	for _, word := range strings.Fields("gmbh ag kg ohg ug eg mbh co und ltd inc llc plc bv sa srl oy ab as") {
+		companyLegalForms[word] = true
+	}
+}
+
+func stripLegalFormSegments(label string) string {
+	if !strings.Contains(label, "-") {
+		return label
+	}
+	segments := strings.Split(label, "-")
+	kept := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if !companyLegalForms[strings.ToLower(segment)] {
+			kept = append(kept, segment)
+		}
+	}
+	return strings.Join(kept, "-")
 }
 
 func (r *Rules) stageAuthentication(msg domain.MessageFeatures, evidence *[]domain.Evidence) {
@@ -409,6 +455,114 @@ func (r *Rules) stageContent(msg domain.MessageFeatures, evidence *[]domain.Evid
 	if blackmailTerms.MatchString(combined) {
 		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeBlackmail, Weight: 0.7, Summary: "Erpressungs-/Sextortion-Drohung (Veröffentlichung, Familie)"})
 	}
+}
+
+// spamVertical beschreibt eine generische Massen-Spam-Kampagnenkategorie:
+// Indikator-Regex, lesbarer Name und das Gewicht bei einem Treffer.
+type spamVertical struct {
+	name   string
+	terms  *regexp.Regexp
+	weight float64
+}
+
+var spamVerticals = []spamVertical{
+	{"Diät-/Gesundheitsprodukt-Kampagne", dietHealthTerms, 0.4},
+	{"Krypto-/Investment-Werbeversprechen", cryptoInvestTerms, 0.4},
+	{"Potenz-/Erotik-Anpreisung", potencyTerms, 0.45},
+	{"Krankenkassen-/Medicare-Lockangebot", insurerBaitTerms, 0.4},
+	{"Wallet-/KYC-Phishing", walletKycTerms, 0.4},
+	{"Kaltakquise mit Förder-/Zuschuss-Versprechen", coldAcquisitionTerms, 0.35},
+}
+
+// profileStopWords sind Standardbegriffe aus dem Einrichtungsassistenten und
+// allgemeine Geschäfts-/Sprachbegriffe. Sie zählen nicht als Profil-Vokabular,
+// damit Boilerplate die Profilvergleichung nicht wirkungslos macht.
+var profileStopWords = map[string]bool{}
+
+func init() {
+	for _, word := range strings.Fields(`kundenanfragen kunden kunde lieferanten lieferant newsletter automatische automatisch kontomails konto konten portale portal mail mails postfach erwartete erwartet unternehmen bestellungen bestellung rechnungen rechnung versand rückfragen anfrage anfragen logins login bestätigungen bestätigung systemmails erwünschte erwünscht deutsch englisch sprachen sprache` ) {
+		profileStopWords[word] = true
+	}
+}
+
+// stageVerticals prüft den Inhalt gegen generische Spam-Kampagnenkategorien
+// (absenderunabhängiges Massenmailing-Vokabular). Der erste Treffer wird als
+// ein Beweisstück gewertet; mehrere Vertikalen würden dieselbe Mail doppelt
+// bestrafen. Zusätzlich wird bei einem Treffer geprüft, ob das hinterlegte
+// Postfachprofil inhaltlich überhaupt berührt wird: Eine Diät-Pillen-Welle ist
+// für ein Design-Postfach ein weit stärkeres Signal als für eine Apotheke.
+// Beides sind reine Evidence-Signale – generisch, erklärbar, keine
+// nutzerspezifische Blockliste.
+func (r *Rules) stageVerticals(msg domain.MessageFeatures, profile domain.MailboxProfile, evidence *[]domain.Evidence) {
+	combined := msg.Subject + " " + msg.Text
+	if len(combined) > 64<<10 {
+		combined = combined[:64<<10]
+	}
+	hit := false
+	for _, vertical := range spamVerticals {
+		if !vertical.terms.MatchString(combined) {
+			continue
+		}
+		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeSpamVertical, Weight: vertical.weight, Summary: "Inhalt passt zur generischen Spam-Kampagnenkategorie: " + vertical.name})
+		hit = true
+		break
+	}
+	if !hit {
+		return
+	}
+	if profileOffTopic(profile, combined) {
+		*evidence = append(*evidence, domain.Evidence{Group: "profile", Code: CodeProfileMismatch, Weight: 0.3, Summary: "Keinerlei inhaltliche Überschneidung mit dem hinterlegten Postfachprofil"})
+	}
+}
+
+// profileOffTopic meldet, ob die Nachricht NULL Themenwörter mit dem
+// Mailboxprofil teilt. Bewusst konservativ: erst ab drei aussagekräftigen
+// Profilwörtern wird geurteilt, Boilerplate zählt nicht, und geordnet wird
+// nur exakt oder per Substring (Wortstamm-Näherung). Der Check läuft NIE
+// allein, sondern nur zusammen mit einem Kampagnentreffer – ungewöhnliche,
+// aber legitime Post (Rechnungen, Benachrichtigungen) bleibt unangetastet.
+func profileOffTopic(profile domain.MailboxProfile, combined string) bool {
+	split := func(input string) []string {
+		return strings.FieldsFunc(strings.ToLower(input), func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		})
+	}
+	profileWords := map[string]bool{}
+	collect := func(input string) {
+		for _, word := range split(input) {
+			if len([]rune(word)) >= 4 && !profileStopWords[word] {
+				profileWords[word] = true
+			}
+		}
+	}
+	collect(profile.Purpose)
+	collect(profile.Industry)
+	for _, item := range profile.ExpectedMailTypes {
+		collect(item)
+	}
+	for _, item := range profile.WantedNewsletters {
+		collect(item)
+	}
+	for _, item := range profile.LegitimateAutomated {
+		collect(item)
+	}
+	if len(profileWords) < 3 {
+		return false // Profil zu dünn für ein Relevanzurteil
+	}
+	messageWords := map[string]bool{}
+	for _, word := range split(combined) {
+		messageWords[word] = true
+	}
+	lower := strings.ToLower(combined)
+	for word := range profileWords {
+		if messageWords[word] {
+			return false
+		}
+		if len([]rune(word)) >= 6 && strings.Contains(lower, word) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Rules) stageLinks(msg domain.MessageFeatures, evidence *[]domain.Evidence) {

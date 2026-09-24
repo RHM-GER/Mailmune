@@ -318,6 +318,12 @@ export default function App() {
       } else if (event.type === "schedule.error") {
         const data = event.data as { accountId?: string; error?: string }
         pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, kind: "error", title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false })
+      } else if (event.type === "model.unavailable") {
+        // KI konfiguriert, aber Ollama antwortet nicht: sichtbare Warnung,
+        // dass ohne laufenden Ollama-Dienst keine KI-Filterung stattfindet.
+        // Die ID pro Konto ersetzt frühere Warnungen statt sie zu stapeln.
+        const data = event.data as { accountId?: string; model?: string; error?: string }
+        pushNotification({ id: `model-unavailable-${data.accountId ?? "unknown"}`, kind: "model", title: "KI-Filterung ausgefallen – Ollama starten", detail: `Das lokale Modell (${data.model ?? "unbekannt"}) ist nicht erreichbar: ${data.error || "Ollama läuft nicht"}. Bitte Ollama starten, sonst prüft nur der Regelfilter.`, time: Date.now(), action: false })
       }
       void refresh()
     }
@@ -1070,8 +1076,11 @@ function Notifications({ scrollRef, items = notifications, archive, onArchiveCha
     </div> })}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
     {view === "archived" && <p className="mt-3 text-right text-[11px] text-[#555]">Archivierte Einträge werden nach 180 Tagen entfernt.</p>}
     </div>
-    {/* Massenaktions-Leiste: klebt am unteren Rand des sichtbaren Bereichs */}
-    <div className="sticky bottom-0 h-0">
+    {/* Massenaktions-Leiste: klebt am unteren Rand des sichtbaren Bereichs.
+        Wichtig: `sticky` erzeugt einen eigenen Stacking-Context – ohne z-40
+        würde das innere z-30 der Leiste eingefangen und der Scroll-Button
+        (z-20) läge darüber. */}
+    <div className="sticky bottom-0 z-40 h-0">
       <FloatingActions visible={selected.length > 0} primary={view === "open" ? `Archivieren (${selected.length})` : `Wiederherstellen (${selected.length})`} onPrimary={bulkAction} onCancel={() => setSelected([])} />
     </div>
     <SectionIndicator items={notificationSections} scrollRef={scrollRef} />
@@ -1095,6 +1104,8 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
   const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
+  // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
+  const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
   // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
   const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
@@ -1214,7 +1225,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
-        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}<AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
+        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
@@ -1226,8 +1237,9 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </div></div>
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
     <SectionIndicator items={settingsSections} scrollRef={settingsScrollRef} />
+    {settingsAccount && <MailboxSettingsDialog account={accounts.find((item) => item.id === settingsAccount.id) ?? settingsAccount} open onOpenChange={(open) => { if (!open) setSettingsAccount(null) }} refresh={refresh} onAction={(action) => { const current = accounts.find((item) => item.id === settingsAccount.id); if (current) void runAccountAction(current, action) }} status={accountStatus[settingsAccount.id]} />}
     <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { setFolderName(folderDraft.trim()); setEditingFolder(false) }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
-    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch { /* Ohne Agent bleibt der Eintrag erhalten */ } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
+    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch (error) { setAccountStatus((current) => ({ ...current, [target.id]: `Löschen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}` })) } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
   </div>
 }
 
@@ -1334,6 +1346,51 @@ function TransferPlaceholder({ kind, accountId }: { kind: "learning" | "profile"
     }
   }
   return <><Tooltip><TooltipTrigger render={<Button size="sm" variant="outline" onClick={() => setOpen(true)}>{learning ? "Lerntransfer" : "Profiltransfer"}</Button>} /><TooltipContent side="top">{learning ? "Anonymisierte Lernmerkmale übertragen" : "Vollständiges Lernprofil übertragen"}</TooltipContent></Tooltip><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]"><DialogHeader><DialogTitle>{learning ? "Lerndaten übertragen" : "Profil übertragen"}</DialogTitle><DialogDescription>{learning ? "Überträgt ausschließlich allgemeine, anonymisierte Lernmerkmale ohne Nachrichtentexte oder personenbezogene Daten." : "Überträgt Regeln, Präferenzen und postfachspezifische Lernmerkmale in ein anderes Profil."}</DialogDescription></DialogHeader><div className="space-y-3 py-2"><Label htmlFor={`${kind}-target`}>Zielprofil</Label><Input id={`${kind}-target`} className="h-12 px-3.5" placeholder="Profile durchsuchen" /><div className="rounded-[10px] border border-dashed border-white/10 px-4 py-5 text-center text-xs text-[#666]">Die direkte Profilauswahl und Übertragung werden später angebunden. „Exportieren“ erstellt eine portable Datei für einen anderen Rechner.</div></div><DialogFooter><Button variant="outline" disabled={busy || !accountId} onClick={() => void exportData()}>{busy ? "Exportiere…" : "Exportieren"}</Button><Button variant="outline" onClick={() => setOpen(false)}>Schließen</Button></DialogFooter></DialogContent></Dialog></>
+}
+
+// Postfach-Einstellungen: Name, Ordner und die Aktionen (Verbindung testen /
+// Jetzt prüfen / Neu prüfen) sind hier gebündelt statt auf der Karte. Das
+// Passwort bleibt unverändert im OS-Schlüsselbund – Speichern ohne Passwort
+// lässt es serverseitig unangetastet.
+function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction, status }: { account: Account; open: boolean; onOpenChange: (open: boolean) => void; refresh: () => void; onAction: (action: "test" | "scan" | "resync") => void; status?: string }) {
+  const [draft, setDraft] = useState(account)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
+  // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
+  // Eingaben mitten im Tippen überschreiben.
+  useEffect(() => { if (open) { setDraft(account); setError("") } }, [open, account.id])
+  const save = async () => {
+    setSaving(true)
+    setError("")
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: draft })
+      await refresh()
+      onOpenChange(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[560px]"><DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle><DialogDescription>Name und Ordner dieses Postfachs. Das Passwort bleibt im Schlüsselbund und wird hier nicht angezeigt.</DialogDescription></DialogHeader>
+    <div className="space-y-4 py-2">
+      <Field label="Anzeigename"><Input className="h-12 px-3.5" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Posteingang"><Input className="h-12 px-3.5" value={draft.inboxFolder} onChange={(event) => setDraft({ ...draft, inboxFolder: event.target.value })} /></Field>
+        <Field label="Gesendet"><Input className="h-12 px-3.5" value={draft.sentFolder} onChange={(event) => setDraft({ ...draft, sentFolder: event.target.value })} /></Field>
+        <Field label="Spam-Ordner"><Input className="h-12 px-3.5" value={draft.spamFolder} onChange={(event) => setDraft({ ...draft, spamFolder: event.target.value })} /></Field>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={() => onAction("test")}>Verbindung testen</Button>
+        <Button size="sm" onClick={() => onAction("scan")}>Jetzt prüfen</Button>
+        <Button size="sm" variant="outline" onClick={() => onAction("resync")}>Neu prüfen</Button>
+      </div>
+      {status && <p className="text-xs leading-5 text-[#888]">{status}</p>}
+      {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
+    </div>
+    <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim()} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
+  </DialogContent></Dialog>
 }
 
 function ConnectionCard({ icon: Icon, title, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {
