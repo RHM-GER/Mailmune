@@ -203,7 +203,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Automatischer-Verschiebung-Hinweis redundant zum Spamverhalten-Slider (Autonom) – entfernen/konsolidieren
 
 **Dashboard & Diagramm**
-- [ ] Neue Serie „Nicht erkannt": Mails, die händisch (externer Client) in den Spamordner gelegt wurden = vom Filter übersehener Spam; gegen Gesamteingang messen (Gegenstück zum Fehlalarm)
+- [x] Neue Serie „Nicht erkannt": Mails, die händisch (externer Client) in den Spamordner gelegt wurden = vom Filter übersehener Spam; gegen Gesamteingang messen (Gegenstück zum Fehlalarm) – ✅ umgesetzt: Spam-Ordner-Sweep nach jedem Scan (`sweepSpamFolder`), privacy-preserving `missed_log` (nur Tag + Message-ID-Hash, Migration 8), `DailyStat.missed` im Contract, gepunktete Amber-Serie im Dashboard-Chart (abschaltbar). Eigene Treffer (Score ≥ 0.60 oder moved/confirmed) zählen nicht; Rescans zählen dank Dedup nie doppelt. Nebeneffekt-Fix: RFC-widrige Message-IDs im Envelope werden jetzt aus dem rohen Header nachgezogen (stabile Hashes für received_log/missed_log)
 - [ ] Floating-Action-Animation (floating-action-enter/exit) auch für andere Elemente erwägen: Nav-List-Items, Diagramm-Switcher (Tag/Monat) – generell Best Practice für Mikro-Animationen bedenken
 
 **Fenster & System**

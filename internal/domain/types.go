@@ -173,6 +173,9 @@ type DailyStat struct {
 	Moved     int    `json:"moved"`
 	Confirmed int    `json:"confirmed"`
 	Rejected  int    `json:"rejected"`
+	// Missed is spam a human or external filter moved into the spam folder
+	// although Mailmune never flagged it ("Nicht erkannt").
+	Missed int `json:"missed"`
 }
 
 // FolderSyncState is the persisted UID synchronization state of one folder.

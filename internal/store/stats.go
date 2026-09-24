@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
@@ -49,7 +51,8 @@ VALUES(?,?,?,?) ON CONFLICT(account_id,message_id_hash) DO NOTHING`,
 // cover every dashboard range; older rows are pure metadata and are purged.
 const receivedLogRetention = 730
 
-// PurgeReceivedLog deletes arrival counters older than the retention window.
+// PurgeReceivedLog deletes arrival and missed-spam counters older than the
+// retention window.
 func (s *SQLite) PurgeReceivedLog(ctx context.Context) (int64, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -receivedLogRetention).Format(statsDay)
 	result, err := s.db.ExecContext(ctx, `DELETE FROM received_log WHERE received_day < ?`, cutoff)
@@ -57,7 +60,51 @@ func (s *SQLite) PurgeReceivedLog(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	affected, _ := result.RowsAffected()
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM missed_log WHERE received_day < ?`, cutoff); err != nil {
+		return affected, err
+	}
 	return affected, nil
+}
+
+// LogMissed records one message found in the account's spam folder that
+// Mailmune itself never flagged (a human or an external filter moved it
+// there). Privacy: only the arrival day and the message-ID hash are stored,
+// and the primary key deduplicates rescans. It reports whether this message
+// was logged for the first time.
+func (s *SQLite) LogMissed(ctx context.Context, accountID, messageIDHash string, receivedAt time.Time) (bool, error) {
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO missed_log(account_id,message_id_hash,received_day,created_at)
+VALUES(?,?,?,?) ON CONFLICT(account_id,message_id_hash) DO NOTHING`,
+		accountID, messageIDHash, receivedAt.UTC().Format(statsDay), formatTime(time.Now()))
+	if err != nil {
+		return false, err
+	}
+	affected, _ := result.RowsAffected()
+	return affected > 0, nil
+}
+
+// spamScoreFloor mirrors the classifier's candidate threshold: decisions at or
+// above it (or already moved/confirmed by review) count as detected spam.
+const spamScoreFloor = 0.60
+
+// FlaggedByMessageIDHash reports whether Mailmune itself already flagged the
+// message as spam (score at/above the candidate floor, or moved/confirmed by
+// review). The spam-folder sweep uses it to tell its own moves apart from
+// human corrections.
+func (s *SQLite) FlaggedByMessageIDHash(ctx context.Context, accountID, messageIDHash string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM decisions
+WHERE account_id=? AND message_id_hash=? AND (score >= ? OR status IN ('moved','confirmed')) LIMIT 1`,
+		accountID, messageIDHash, spamScoreFloor).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StatsByReceivedDay aggregates the arrival counters and stored decisions by the EMAIL RECEIVED date
@@ -69,9 +116,11 @@ func (s *SQLite) PurgeReceivedLog(ctx context.Context) (int64, error) {
 //     later marked as a false alarm leaves this count,
 //   - Rejected  = false alarms (a reviewer marked a flagged mail legit); these
 //     are a subset of the originally flagged mail,
+//   - Missed    = spam that a human or an external filter moved into the spam
+//     folder although Mailmune never flagged it ("Nicht erkannt"),
 //   - Moved is unused (always 0).
-// Invariant: Confirmed + Rejected <= Processed (spam and false alarms are both
-// subsets of everything that arrived). The arrival total comes from the
+// Invariant: Confirmed + Rejected + Missed <= Processed (all three are subsets
+// of everything that arrived). The arrival total comes from the
 // privacy-preserving received_log, so it is complete in normal operation;
 // decisions alone only contain candidates. Days scanned before received_log
 // existed are clamped so the invariant still holds.
@@ -84,19 +133,22 @@ func (s *SQLite) StatsByReceivedDay(ctx context.Context, days int, accountID str
 	// accountID leer = alle Postfächer (Demo-/Gesamtansicht), sonst strikt nur
 	// das aktive Profil - Daten verschiedener Profile werden nie gemischt.
 	accountFilter := ""
-	args := []any{since, since}
+	args := []any{since, since, since}
 	if accountID != "" {
 		accountFilter = " AND account_id = ?"
-		args = []any{since, accountID, since, accountID}
+		args = []any{since, accountID, since, accountID, since, accountID}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT day, MAX(received), 0, MAX(spam), MAX(rejected) FROM (
-SELECT received_day AS day, COUNT(*) AS received, 0 AS spam, 0 AS rejected
+	rows, err := s.db.QueryContext(ctx, `SELECT day, MAX(received), 0, MAX(spam), MAX(rejected), MAX(missed) FROM (
+SELECT received_day AS day, COUNT(*) AS received, 0 AS spam, 0 AS rejected, 0 AS missed
 FROM received_log WHERE received_day >= ?`+accountFilter+` GROUP BY received_day
 UNION ALL
 SELECT substr(received_at,1,10) AS day, COUNT(*) AS received,
 SUM(CASE WHEN score >= 0.60 AND status != 'rejected' THEN 1 ELSE 0 END) AS spam,
-SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected
+SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected, 0 AS missed
 FROM decisions WHERE substr(received_at,1,10) >= ?`+accountFilter+` GROUP BY substr(received_at,1,10)
+UNION ALL
+SELECT received_day AS day, 0 AS received, 0 AS spam, 0 AS rejected, COUNT(*) AS missed
+FROM missed_log WHERE received_day >= ?`+accountFilter+` GROUP BY received_day
 ) GROUP BY day ORDER BY day ASC`, args...)
 	if err != nil {
 		return nil, err
@@ -105,12 +157,12 @@ FROM decisions WHERE substr(received_at,1,10) >= ?`+accountFilter+` GROUP BY sub
 	var series []domain.DailyStat
 	for rows.Next() {
 		var stat domain.DailyStat
-		if err := rows.Scan(&stat.Day, &stat.Processed, &stat.Moved, &stat.Confirmed, &stat.Rejected); err != nil {
+		if err := rows.Scan(&stat.Day, &stat.Processed, &stat.Moved, &stat.Confirmed, &stat.Rejected, &stat.Missed); err != nil {
 			return nil, err
 		}
 		// Legacy days (decisions stored before received_log existed) may lack
-		// arrival rows; keep spam/false alarms a subset of the total.
-		if floor := stat.Confirmed + stat.Rejected; stat.Processed < floor {
+		// arrival rows; keep spam/false alarms/missed a subset of the total.
+		if floor := stat.Confirmed + stat.Rejected + stat.Missed; stat.Processed < floor {
 			stat.Processed = floor
 		}
 		series = append(series, stat)

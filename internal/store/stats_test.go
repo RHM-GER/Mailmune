@@ -123,6 +123,67 @@ func TestStatsByReceivedDayGroupsByReceivedDate(t *testing.T) {
 	}
 }
 
+// TestMissedLogCountsOnceAndFeedsStats covers the "Nicht erkannt" pipeline:
+// missed_log deduplicates by (account, hash), FlaggedByMessageIDHash tells own
+// detections from human corrections apart, and StatsByReceivedDay exposes the
+// missed series per received day.
+func TestMissedLogCountsOnceAndFeedsStats(t *testing.T) {
+	store := openTestStore(t)
+	insertTestAccount(t, store, "stats-missed")
+	ctx := context.Background()
+	day := time.Now().UTC().AddDate(0, 0, -2)
+	dayKey := day.Format("2006-01-02")
+
+	first, err := store.LogMissed(ctx, "stats-missed", "hash-m1", day)
+	if err != nil || !first {
+		t.Fatalf("first missed log = %v, %v", first, err)
+	}
+	again, err := store.LogMissed(ctx, "stats-missed", "hash-m1", day)
+	if err != nil || again {
+		t.Fatalf("duplicate missed log must not count twice: %v, %v", again, err)
+	}
+
+	// Without any decision the message counts as not detected.
+	if flagged, err := store.FlaggedByMessageIDHash(ctx, "stats-missed", "hash-lo"); err != nil || flagged {
+		t.Fatalf("no decision => not flagged: %v, %v", flagged, err)
+	}
+	save := func(id string, hash string, uid uint32, score float64, status domain.DecisionStatus) {
+		d := domain.MessageDecision{
+			ID: id, AccountID: "stats-missed", UIDValidity: 1, UID: uid, MessageIDHash: hash,
+			OriginFolder: "INBOX", CurrentFolder: "INBOX", From: "a@b.example", Subject: "s",
+			Score: score, Status: status, IdempotencyKey: "k-" + id,
+			ReceivedAt: day, CreatedAt: day,
+		}
+		if _, _, err := store.SaveDecision(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("m-lo", "hash-lo", 1, 0.2, domain.StatusPending)
+	save("m-hi", "hash-hi", 2, 0.9, domain.StatusPending)
+	save("m-moved", "hash-moved", 3, 0.1, domain.StatusMoved)
+	if flagged, err := store.FlaggedByMessageIDHash(ctx, "stats-missed", "hash-lo"); err != nil || flagged {
+		t.Errorf("below-threshold decision must NOT count as flagged: %v, %v", flagged, err)
+	}
+	if flagged, err := store.FlaggedByMessageIDHash(ctx, "stats-missed", "hash-hi"); err != nil || !flagged {
+		t.Errorf("high-score decision must count as flagged: %v, %v", flagged, err)
+	}
+	if flagged, err := store.FlaggedByMessageIDHash(ctx, "stats-missed", "hash-moved"); err != nil || !flagged {
+		t.Errorf("moved decision must count as flagged regardless of score: %v, %v", flagged, err)
+	}
+
+	series, err := store.StatsByReceivedDay(ctx, 3660, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byDay := map[string]domain.DailyStat{}
+	for _, stat := range series {
+		byDay[stat.Day] = stat
+	}
+	if byDay[dayKey].Missed != 1 {
+		t.Fatalf("missed series wrong: %+v", byDay[dayKey])
+	}
+}
+
 func TestReceivedLogCountsArrivalsOnceAndFeedsStats(t *testing.T) {
 	store := openTestStore(t)
 	insertTestAccount(t, store, "stats-log")

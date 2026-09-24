@@ -206,6 +206,26 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_received_log_day ON received_log(received_day)`,
 		},
 	},
+	{
+		id:   8,
+		name: "missed_log",
+		stmts: []string{
+			// Privacy-preserving counter of MISSED spam for the dashboard's
+			// "Nicht erkannt" series: one row per message that sits in the
+			// account's spam folder although Mailmune never flagged it (a human
+			// or an external filter moved it there). Like received_log it stores
+			// ONLY the arrival day and the message-ID hash - never sender,
+			// subject or text - and the primary key deduplicates rescans.
+			`CREATE TABLE IF NOT EXISTS missed_log (
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+ message_id_hash TEXT NOT NULL,
+ received_day TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(account_id, message_id_hash)
+)`,
+			`CREATE INDEX IF NOT EXISTS idx_missed_log_day ON missed_log(received_day)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

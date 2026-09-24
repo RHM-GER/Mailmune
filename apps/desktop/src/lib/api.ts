@@ -212,6 +212,8 @@ export interface DailyStat {
   moved: number
   confirmed: number
   rejected: number
+  /** „Nicht erkannt“: Spam, den Mensch/Fremdfilter einsortiert haben, obwohl Mailmune ihn nicht flaggte. */
+  missed: number
 }
 
 export function stats(days = 400, accountId?: string | null): Promise<DailyStat[]> {

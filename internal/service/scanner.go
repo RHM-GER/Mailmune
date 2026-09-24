@@ -113,6 +113,13 @@ func (s *Scanner) startScan(ctx context.Context, accountID string, resync, deep 
 		if err := s.store.DeleteFolderSyncState(ctx, accountID, account.InboxFolder); err != nil {
 			return domain.ScanRun{}, err
 		}
+		// Re-check the spam-folder sweep from scratch too; the missed_log
+		// deduplication keeps the counters correct across a full re-read.
+		if account.SpamFolder != "" && !strings.EqualFold(account.SpamFolder, account.InboxFolder) {
+			if err := s.store.DeleteFolderSyncState(ctx, accountID, account.SpamFolder); err != nil {
+				return domain.ScanRun{}, err
+			}
+		}
 	}
 
 	s.mu.Lock()
@@ -403,6 +410,9 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		_ = s.store.RecordDailyStats(context.Background(), account.ID, "", scanned, result.moved, 0, 0)
 		// Arrival counters are pure metadata; keep them bounded anyway.
 		_, _ = s.store.PurgeReceivedLog(context.Background())
+		// Spam, das ein Mensch oder ein Fremdfilter einsortiert hat, wird als
+		// "Nicht erkannt"-Serie erfasst (read-only Sweep des Spam-Ordners).
+		s.sweepSpamFolder(ctx, account, password, run)
 		s.finish(run.ID, domain.ScanCompleted, "")
 	case errors.Is(syncErr, context.Canceled):
 		s.finish(run.ID, domain.ScanCancelled, "")
@@ -410,6 +420,55 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		s.finish(run.ID, domain.ScanFailed, redactError(syncErr))
 	}
 	return result
+}
+
+// sweepSpamFolder counts MISSED spam: messages sitting in the account's spam
+// folder that Mailmune itself never flagged - a human moved them there by hand
+// in a mail client, or an external filter did. It feeds the dashboard's
+// "Nicht erkannt" series (measured against the whole arrival total). The
+// sweep is strictly read-only: it never moves or modifies anything and stores
+// only day + message-ID hash. A missing/unreadable spam folder is a warning,
+// never a failed run.
+func (s *Scanner) sweepSpamFolder(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun) int {
+	folder := account.SpamFolder
+	if folder == "" || strings.EqualFold(folder, account.InboxFolder) {
+		return 0
+	}
+	prev, _, err := s.store.FolderSyncState(ctx, account.ID, folder)
+	if err != nil {
+		return 0
+	}
+	missed := 0
+	opts := mailbox.SyncOptions{MaxMessages: mailbox.DefaultMaxMessages}
+	handler := func(message domain.MessageFeatures, _ string) error {
+		if strings.TrimSpace(message.MessageID) == "" {
+			// Without a message ID there is no dedup key; skip to avoid
+			// double-counting on rescans.
+			return nil
+		}
+		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
+		hashHex := hex.EncodeToString(hash[:])
+		if flagged, err := s.store.FlaggedByMessageIDHash(ctx, account.ID, hashHex); err != nil || flagged {
+			return nil
+		}
+		if first, err := s.store.LogMissed(ctx, account.ID, hashHex, message.ReceivedAt); err == nil && first {
+			missed++
+		}
+		return nil
+	}
+	outcome, syncErr := s.mailbox.SyncFolder(ctx, account, password, folder, stateOrNil(prev), opts, handler)
+	if outcome != nil && outcome.UIDValidity != 0 && (syncErr == nil || errors.Is(syncErr, context.Canceled)) {
+		_ = s.store.SaveFolderSyncState(context.Background(), domain.FolderSyncState{
+			AccountID: account.ID, Folder: folder,
+			UIDValidity: outcome.UIDValidity, LastUID: outcome.LastUID, LastSyncAt: time.Now().UTC(),
+		})
+	}
+	if syncErr != nil && !errors.Is(syncErr, context.Canceled) {
+		s.publish("scan.progress", ScanEvent{Run: run, Warnings: []string{
+			"\"Nicht erkannt\"-Pr\u00fcung: Spam-Ordner nicht lesbar (" + redactError(syncErr) + ")",
+		}})
+	}
+	return missed
 }
 
 // consultModel runs the optional local Ollama classification and merges a

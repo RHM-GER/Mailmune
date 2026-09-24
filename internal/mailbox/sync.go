@@ -318,6 +318,12 @@ func buildFeatures(account domain.AccountConfig, folder string, uidValidity uint
 	}
 	if len(fetched.headerBytes) > 0 {
 		if parsed, err := mail.ReadMessage(strings.NewReader(string(fetched.headerBytes) + "\r\n")); err == nil {
+			if features.MessageID == "" {
+				// Envelope msg-ids that violate RFC 5322 (e.g. spaces inside
+				// the ID) are dropped by the IMAP envelope parser; the raw
+				// header is still a stable dedup key for arrival/missed logs.
+				features.MessageID = strings.TrimSpace(parsed.Header.Get("Message-ID"))
+			}
 			features.ListUnsubscribe = parsed.Header.Get("List-Unsubscribe") != ""
 			features.ReturnPath = parsed.Header.Get("Return-Path")
 			if auth := parsed.Header.Get("Authentication-Results"); auth != "" {

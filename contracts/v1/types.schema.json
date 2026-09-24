@@ -282,13 +282,14 @@
     "DailyStat": {
       "description": "Ein Tag aggregierter Aktivitaet ueber alle Konten; fuellt die Dashboard-Charts mit echten Daten.",
       "type": "object",
-      "required": ["day", "processed", "moved", "confirmed", "rejected"],
+      "required": ["day", "processed", "moved", "confirmed", "rejected", "missed"],
       "properties": {
         "day": { "type": "string", "description": "Tag im Format YYYY-MM-DD (UTC)." },
         "processed": { "type": "integer", "minimum": 0 },
         "moved": { "type": "integer", "minimum": 0 },
         "confirmed": { "type": "integer", "minimum": 0 },
-        "rejected": { "type": "integer", "minimum": 0 }
+        "rejected": { "type": "integer", "minimum": 0 },
+        "missed": { "type": "integer", "minimum": 0, "description": "Nicht erkannt: Spam, den ein Mensch oder Fremdfilter einsortiert hat, obwohl Mailmune ihn nicht flaggte." }
       },
       "additionalProperties": false
     }

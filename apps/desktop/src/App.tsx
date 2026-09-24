@@ -67,12 +67,12 @@ function spamCategory(decision: Decision) {
 }
 
 // Date helpers for the custom range picker (plain JS, no extra dependency).
-const chartDataByPeriod: Record<string, Array<{ label: string; spam: number; inbox: number; falsePositive: number }>> = {
-  Tag: ["00", "04", "08", "12", "16", "20"].map((label, index) => ({ label, spam: [1, 0, 3, 5, 4, 2][index], inbox: [5, 3, 18, 27, 24, 14][index], falsePositive: [0, 0, 0, 1, 0, 0][index] })),
-  Woche: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((label, index) => ({ label, spam: [8, 17, 11, 23, 14, 6, 7][index], inbox: [54, 68, 61, 77, 70, 39, 31][index], falsePositive: [0, 1, 0, 1, 0, 0, 0][index] })),
-  Monat: ["KW 1", "KW 2", "KW 3", "KW 4"].map((label, index) => ({ label, spam: [62, 81, 74, 93][index], inbox: [420, 486, 451, 528][index], falsePositive: [2, 3, 1, 4][index] })),
-  Jahr: ["Jan", "Mär", "Mai", "Jul", "Sep", "Nov"].map((label, index) => ({ label, spam: [231, 284, 318, 296, 347, 371][index], inbox: [2030, 2180, 2340, 2210, 2470, 2590][index], falsePositive: [9, 11, 8, 13, 10, 12][index] })),
-  Gesamt: ["2022", "2023", "2024", "2025", "2026"].map((label, index) => ({ label, spam: [1820, 2460, 3110, 3840, 2730][index], inbox: [16800, 20100, 24800, 29100, 22400][index], falsePositive: [78, 92, 108, 126, 81][index] })),
+const chartDataByPeriod: Record<string, Array<{ label: string; spam: number; inbox: number; falsePositive: number; missed: number }>> = {
+  Tag: ["00", "04", "08", "12", "16", "20"].map((label, index) => ({ label, spam: [1, 0, 3, 5, 4, 2][index], inbox: [5, 3, 18, 27, 24, 14][index], falsePositive: [0, 0, 0, 1, 0, 0][index], missed: [0, 0, 0, 0, 1, 0][index] })),
+  Woche: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((label, index) => ({ label, spam: [8, 17, 11, 23, 14, 6, 7][index], inbox: [54, 68, 61, 77, 70, 39, 31][index], falsePositive: [0, 1, 0, 1, 0, 0, 0][index], missed: [1, 0, 0, 2, 0, 0, 0][index] })),
+  Monat: ["KW 1", "KW 2", "KW 3", "KW 4"].map((label, index) => ({ label, spam: [62, 81, 74, 93][index], inbox: [420, 486, 451, 528][index], falsePositive: [2, 3, 1, 4][index], missed: [3, 1, 2, 0][index] })),
+  Jahr: ["Jan", "Mär", "Mai", "Jul", "Sep", "Nov"].map((label, index) => ({ label, spam: [231, 284, 318, 296, 347, 371][index], inbox: [2030, 2180, 2340, 2210, 2470, 2590][index], falsePositive: [9, 11, 8, 13, 10, 12][index], missed: [6, 4, 7, 5, 3, 4][index] })),
+  Gesamt: ["2022", "2023", "2024", "2025", "2026"].map((label, index) => ({ label, spam: [1820, 2460, 3110, 3840, 2730][index], inbox: [16800, 20100, 24800, 29100, 22400][index], falsePositive: [78, 92, 108, 126, 81][index], missed: [40, 33, 28, 19, 12][index] })),
 }
 
 // Benachrichtigungsarten für den Filter; Labels sind neutral gehalten.
@@ -101,7 +101,7 @@ function formatNotificationTime(ms: number): string {
   return `${date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}, ${time}`
 }
 
-type ChartPoint = { label: string; spam: number; inbox: number; falsePositive: number }
+type ChartPoint = { label: string; spam: number; inbox: number; falsePositive: number; missed: number }
 
 /**
  * Baut die Chart-Daten aus echten Tagesstatistiken des Agenten. Die
@@ -116,14 +116,16 @@ function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
     let spam = 0
     let processed = 0
     let rejected = 0
+    let missed = 0
     for (const day of days) {
       const stat = byDay.get(day)
       if (!stat) continue
       spam += stat.moved + stat.confirmed
       processed += stat.processed
       rejected += stat.rejected
+      missed += stat.missed
     }
-    return { label, spam, inbox: processed, falsePositive: rejected }
+    return { label, spam, inbox: processed, falsePositive: rejected, missed }
   }
   if (period === "Tag") return [accumulate("Heute", [dayKey(today)])]
   if (period === "Woche") {
@@ -149,14 +151,15 @@ function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
   if (period === "Jahr") {
     const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
     const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11, 1))
-    const byMonth = new Map<string, { spam: number; processed: number; rejected: number }>()
+    const byMonth = new Map<string, { spam: number; processed: number; rejected: number; missed: number }>()
     for (const stat of stats) {
       if (new Date(stat.day + "T00:00:00Z") < cutoff) continue
       const key = stat.day.slice(0, 7)
-      const bucket = byMonth.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
+      const bucket = byMonth.get(key) ?? { spam: 0, processed: 0, rejected: 0, missed: 0 }
       bucket.spam += stat.moved + stat.confirmed
       bucket.processed += stat.processed
       bucket.rejected += stat.rejected
+      bucket.missed += stat.missed
       byMonth.set(key, bucket)
     }
     return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, bucket]) => ({
@@ -164,18 +167,20 @@ function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
       spam: bucket.spam,
       inbox: bucket.processed,
       falsePositive: bucket.rejected,
+      missed: bucket.missed,
     }))
   }
   // Gesamt: über den gesamten Zeitraum nach Monaten gruppieren, damit die
   // Verteilung als Linie sichtbar wird statt als einzelner Punkt pro Jahr.
   const allMonthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
-  const byMonthAll = new Map<string, { spam: number; processed: number; rejected: number }>()
+  const byMonthAll = new Map<string, { spam: number; processed: number; rejected: number; missed: number }>()
   for (const stat of stats) {
     const key = stat.day.slice(0, 7)
-    const bucket = byMonthAll.get(key) ?? { spam: 0, processed: 0, rejected: 0 }
+    const bucket = byMonthAll.get(key) ?? { spam: 0, processed: 0, rejected: 0, missed: 0 }
     bucket.spam += stat.moved + stat.confirmed
     bucket.processed += stat.processed
     bucket.rejected += stat.rejected
+    bucket.missed += stat.missed
     byMonthAll.set(key, bucket)
   }
   return [...byMonthAll.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, bucket]) => ({
@@ -183,6 +188,7 @@ function buildRealChartData(stats: DailyStat[], period: string): ChartPoint[] {
     spam: bucket.spam,
     inbox: bucket.processed,
     falsePositive: bucket.rejected,
+    missed: bucket.missed,
   }))
 }
 
@@ -500,9 +506,12 @@ function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats, noti
   useEffect(() => { localStorage.setItem("mailmune.dashboardPeriod", period) }, [period])
   const [showInbox, setShowInbox] = useState(true)
   const [showFalsePositives, setShowFalsePositives] = useState(true)
+  // „Nicht erkannt“: Spam, den Mensch/Fremdfilter einsortiert haben. Serie ist
+  // per Legende abschaltbar wie Eingang und Fehlalarme.
+  const [showMissed, setShowMissed] = useState(true)
   // Echte Agent-Daten in der Desktop-App; Demo-Daten nur in der Browser-Vorschau.
   const activeChartData = dailyStats ? buildRealChartData(dailyStats, period) : chartDataByPeriod[period]
-  const totals = activeChartData.reduce((sum, item) => ({ spam: sum.spam + item.spam, inbox: sum.inbox + item.inbox, falsePositive: sum.falsePositive + item.falsePositive }), { spam: 0, inbox: 0, falsePositive: 0 })
+  const totals = activeChartData.reduce((sum, item) => ({ spam: sum.spam + item.spam, inbox: sum.inbox + item.inbox, falsePositive: sum.falsePositive + item.falsePositive, missed: sum.missed + item.missed }), { spam: 0, inbox: 0, falsePositive: 0, missed: 0 })
   const spamShare = totals.inbox > 0 ? Math.round((totals.spam / totals.inbox) * 100) : 0
   return <div className="dashboard-cards space-y-6">
     {isTauri() && !agentOnline && <p role="status" className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-xs text-[#999]">Der lokale Agent ist noch nicht erreichbar. Sobald er läuft, erscheinen hier echte Daten.</p>}
@@ -514,7 +523,7 @@ function Dashboard({ summary, onReview, scrollRef, agentOnline, dailyStats, noti
       <Metric label="Fehlalarmrate" value={`${(summary.falsePositiveRate * 100).toFixed(1)} %`} note="Bestätigte Prüfungen" />
     </div>
     <div data-section-id="dashboard-analysis" className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
-      <Card className="relative min-w-0 border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader className="pr-[340px]"><div><CardTitle>Spam</CardTitle><CardDescription>Spam im Verhältnis zum normalen Eingang</CardDescription></div><div className="absolute right-6 top-6"><Segmented options={["Tag", "Woche", "Monat", "Jahr", "Gesamt"]} value={period} onChange={setPeriod} /></div></CardHeader><CardContent className="min-w-0 pt-2"><div className="mb-4 flex flex-wrap items-end justify-between gap-4"><div className="flex items-baseline gap-3"><span className="text-3xl font-medium text-[#ff6b2c]">{spamShare} %</span><span className="text-xs text-[#777]">Spam · {totals.spam.toLocaleString("de-DE")} Nachrichten</span></div><div className="flex flex-wrap gap-2 text-xs"><span className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[#ff6b2c]"><span className="size-2 rounded-full bg-[#ff6b2c]" />Spam</span><button onClick={() => setShowInbox((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showInbox ? "bg-white/[0.05] text-[#d6d6d6]" : "text-[#555]"}`}><span className={`size-2 rounded-full ${showInbox ? "bg-[#d6d6d6]" : "bg-[#555]"}`} />Eingang · {totals.inbox.toLocaleString("de-DE")}</button><button onClick={() => setShowFalsePositives((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showFalsePositives ? "bg-white/[0.05] text-[#858585]" : "text-[#4d4d4d]"}`}><span className={`size-2 rounded-full ${showFalsePositives ? "bg-[#858585]" : "bg-[#4d4d4d]"}`} />Fehlalarme · {totals.falsePositive.toLocaleString("de-DE")}</button></div></div><div className="h-[240px]"><ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 640, height: 240 }}><AreaChart data={activeChartData}><defs><linearGradient id="spamArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ff6b2c" stopOpacity={0.42} /><stop offset="95%" stopColor="#ff6b2c" stopOpacity={0.02} /></linearGradient><linearGradient id="inboxArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d6d6d6" stopOpacity={0.16} /><stop offset="95%" stopColor="#d6d6d6" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid vertical={false} stroke="rgba(255,255,255,.055)" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#777", fontSize: 12 }} /><YAxis axisLine={false} tickLine={false} tick={{ fill: "#666", fontSize: 11 }} width={34} domain={[0, "auto"]} /><ChartTooltip cursor={false} contentStyle={{ background: "#242424", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, fontSize: 12 }} />{showInbox && <Area type="monotone" dataKey="inbox" name="Eingang" fill="url(#inboxArea)" stroke="#d6d6d6" strokeWidth={1.5} dot={false} />}{showFalsePositives && <Area type="monotone" dataKey="falsePositive" name="Fehlalarme" fill="transparent" stroke="#858585" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />}<Area type="monotone" dataKey="spam" name="Spam" fill="url(#spamArea)" stroke="#ff6b2c" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#ff6b2c" }} /></AreaChart></ResponsiveContainer></div></CardContent></Card>
+      <Card className="relative min-w-0 border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader className="pr-[340px]"><div><CardTitle>Spam</CardTitle><CardDescription>Spam im Verhältnis zum normalen Eingang</CardDescription></div><div className="absolute right-6 top-6"><Segmented options={["Tag", "Woche", "Monat", "Jahr", "Gesamt"]} value={period} onChange={setPeriod} /></div></CardHeader><CardContent className="min-w-0 pt-2"><div className="mb-4 flex flex-wrap items-end justify-between gap-4"><div className="flex items-baseline gap-3"><span className="text-3xl font-medium text-[#ff6b2c]">{spamShare} %</span><span className="text-xs text-[#777]">Spam · {totals.spam.toLocaleString("de-DE")} Nachrichten</span></div><div className="flex flex-wrap gap-2 text-xs"><span className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[#ff6b2c]"><span className="size-2 rounded-full bg-[#ff6b2c]" />Spam</span><button onClick={() => setShowInbox((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showInbox ? "bg-white/[0.05] text-[#d6d6d6]" : "text-[#555]"}`}><span className={`size-2 rounded-full ${showInbox ? "bg-[#d6d6d6]" : "bg-[#555]"}`} />Eingang · {totals.inbox.toLocaleString("de-DE")}</button><button onClick={() => setShowFalsePositives((value) => !value)} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showFalsePositives ? "bg-white/[0.05] text-[#858585]" : "text-[#4d4d4d]"}`}><span className={`size-2 rounded-full ${showFalsePositives ? "bg-[#858585]" : "bg-[#4d4d4d]"}`} />Fehlalarme · {totals.falsePositive.toLocaleString("de-DE")}</button><button onClick={() => setShowMissed((value) => !value)} aria-pressed={showMissed} className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${showMissed ? "bg-white/[0.05] text-[#e0a86c]" : "text-[#4d4d4d]"}`}><span className={`size-2 rounded-full ${showMissed ? "bg-[#e0a86c]" : "bg-[#4d4d4d]"}`} />Nicht erkannt · {totals.missed.toLocaleString("de-DE")}</button></div></div><div className="h-[240px]"><ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 640, height: 240 }}><AreaChart data={activeChartData}><defs><linearGradient id="spamArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ff6b2c" stopOpacity={0.42} /><stop offset="95%" stopColor="#ff6b2c" stopOpacity={0.02} /></linearGradient><linearGradient id="inboxArea" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#d6d6d6" stopOpacity={0.16} /><stop offset="95%" stopColor="#d6d6d6" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid vertical={false} stroke="rgba(255,255,255,.055)" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#777", fontSize: 12 }} /><YAxis axisLine={false} tickLine={false} tick={{ fill: "#666", fontSize: 11 }} width={34} domain={[0, "auto"]} /><ChartTooltip cursor={false} contentStyle={{ background: "#242424", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, fontSize: 12 }} />{showInbox && <Area type="monotone" dataKey="inbox" name="Eingang" fill="url(#inboxArea)" stroke="#d6d6d6" strokeWidth={1.5} dot={false} />}{showFalsePositives && <Area type="monotone" dataKey="falsePositive" name="Fehlalarme" fill="transparent" stroke="#858585" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />}{showMissed && <Area type="monotone" dataKey="missed" name="Nicht erkannt" fill="transparent" stroke="#e0a86c" strokeWidth={1.5} strokeDasharray="2 3" dot={false} />}<Area type="monotone" dataKey="spam" name="Spam" fill="url(#spamArea)" stroke="#ff6b2c" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#ff6b2c" }} /></AreaChart></ResponsiveContainer></div></CardContent></Card>
       <Card className="border-white/[0.07] bg-[#1b1b1b] shadow-none"><CardHeader><CardTitle>Letzte Benachrichtigungen</CardTitle><CardDescription>Lokale Ereignisse und offene Aufgaben</CardDescription></CardHeader><CardContent className="divide-y divide-white/[0.06]">{(recentNotifications ?? notifications).map((item) => <button key={item.id} type="button" onClick={onNotifications} className="flex w-full gap-3 py-4 text-left first:pt-0 transition-opacity hover:opacity-80"><div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05]">{item.action ? <BellDot className="size-4" /> : <Check className="size-4 text-[#999]" />}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.title}</p><p className="mt-1 truncate text-xs leading-5 text-[#888]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div></button>)}</CardContent></Card>
     </div>
     <SectionIndicator items={[{ id: "dashboard-summary", label: "Kennzahlen" }, { id: "dashboard-analysis", label: "Analyse" }]} scrollRef={scrollRef} />
