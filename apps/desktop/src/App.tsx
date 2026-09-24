@@ -19,6 +19,7 @@ import { useTheme } from "@/components/theme-provider"
 import { agentRequest, calibration, deleteAccount, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
 type Page = "dashboard" | "review" | "notifications" | "settings"
 type Range = "week" | "month" | "year" | "all" | "custom"
@@ -89,6 +90,26 @@ const notifications: NotificationItem[] = [
 // beim Rendern formatiert, damit „Heute/Gestern“ über Neustarts korrekt bleibt.
 type AgentNotification = { id: string; kind: NotificationKind; title: string; detail: string; time: number; action: boolean }
 type NotificationItem = { id: string; kind: NotificationKind; title: string; detail: string; time: string; action: boolean }
+
+// OS-Push für wichtige Agent-Ereignisse. Während das Fenster im Fokus ist,
+// erscheint kein Push (die Meldung ist bereits sichtbar). Die Berechtigung
+// wird beim ersten relevanten Ereignis einmalig erfragt; bei Ablehnung
+// bleiben nur die In-App-Benachrichtigungen. Fehler werden still ignoriert –
+// Push ist ein Zusatzkanal, niemals kritische Funktionalität.
+let osPushAllowed = false
+async function sendOsNotification(title: string, body: string) {
+  if (!isTauri()) return
+  try {
+    if (!osPushAllowed) {
+      osPushAllowed = (await isPermissionGranted()) || (await requestPermission()) === "granted"
+      if (!osPushAllowed) return
+    }
+    if (await getCurrentWindow().isFocused()) return
+    await sendNotification({ title, body })
+  } catch {
+    // silently ignore
+  }
+}
 
 function formatNotificationTime(ms: number): string {
   const date = new Date(ms)
@@ -218,7 +239,13 @@ export default function App() {
     try { return (JSON.parse(localStorage.getItem("mailmune.notifications") ?? "[]") as AgentNotification[]).slice(0, 50) } catch { return [] }
   })
   useEffect(() => { if (isTauri()) localStorage.setItem("mailmune.notifications", JSON.stringify(agentNotifications)) }, [agentNotifications])
-  const pushNotification = (item: AgentNotification) => setAgentNotifications((current) => [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 50))
+  const pushNotification = (item: AgentNotification) => {
+    setAgentNotifications((current) => [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 50))
+    // Reine Scan-Informationen ohne Handlungsbedarf bleiben In-App;
+    // alles Wichtige (Verdachtsfälle, Fehler, Wochenprüfung, Modell)
+    // geht zusätzlich als OS-Push raus.
+    if (item.action || item.kind !== "scan") void sendOsNotification(item.title, item.detail)
+  }
   // Das Archiv liegt in der App, damit der Nav-Punkt verschwindet, sobald
   // alle Benachrichtigungen archiviert sind.
   const [notificationArchive, setNotificationArchive] = useState<Record<string, number>>(() => {
@@ -316,9 +343,11 @@ export default function App() {
   // Offene Prüffälle als echte, nachgeführte Benachrichtigung: ersetzt sich
   // selbst, sobald sich die Anzahl ändert, und verschwindet bei null nicht
   // spurlos – sie bleibt als erledigter Eintrag stehen.
+  const pushedPendingRef = useRef(0)
   useEffect(() => {
     if (!isTauri()) return
     if (summary.pending <= 0) {
+      pushedPendingRef.current = 0
       setAgentNotifications((current) => current.filter((entry) => entry.id !== "review-required"))
       return
     }
@@ -328,6 +357,12 @@ export default function App() {
       if (existing && existing.title === title) return current
       return [{ id: "review-required", kind: "review" as const, title, detail: "Die Bewertung war für eine automatische Zuordnung nicht sicher genug.", time: Date.now(), action: true }, ...current.filter((entry) => entry.id !== "review-required")].slice(0, 50)
     })
+    // OS-Push nur, wenn sich die Anzahl wirklich geändert hat (Ref statt
+    // Zustandsvergleich, damit der Effect idempotent bleibt).
+    if (summary.pending !== pushedPendingRef.current) {
+      pushedPendingRef.current = summary.pending
+      void sendOsNotification(`${summary.pending} Fälle benötigen eine Prüfung`, "Mailmune: neue Verdachtsfälle warten im Review.")
+    }
   }, [summary.pending])
 
   return (

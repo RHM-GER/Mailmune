@@ -176,7 +176,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Benachrichtigungsseite: Suche + Filter nach Benachrichtigungsart (Scans/Prüffälle/Wochenprüfung/Fehler/KI-Modell) im Tabellen-Stil
 - [x] Benachrichtigungs-Items: Checkbox statt Icon, Alle auswählen, Massen-Leiste „Archivieren (N)“ bzw. „Wiederherstellen (N)“ im Archiv; Listenstil beibehalten
 - [x] Dashboard „Letzte Benachrichtigungen": Einträge sind Links zur Benachrichtigungsseite (und zeigen echte statt Demo-Einträge)
-- [ ] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification)
+- [x] OS-Push-Benachrichtigungen funktionieren noch nicht (Tauri Notification) – ✅ umgesetzt: `sendOsNotification` in App.tsx nutzt `@tauri-apps/plugin-notification` (Cargo-Dep, npm-Paket, Capability und Rust-Init waren schon vorhanden). Permission wird beim ersten relevanten Ereignis einmalig erfragt; bei offenem/fokussiertem Fenster kommt kein Push (Best Practice). Gepusht werden: neue/geänderte Prüffall-Anzahl, Scan-Fehler, Wochenprüfung, Modell-Ereignisse und Scan-Abschlüsse NUR mit Verdachtsfällen – stille Scans/Abbrüche bleiben In-App, damit es nicht nervt. Review-Push ist per Ref gegen Doppel-Fire geschützt. Manuelles Testen am echten Build steht noch aus (Permission-Dialog Windows).
 
 **Filter & Tabelle (Review)**
 - [x] Score-Range-Slider an Einstellungen angeglichen (1:1): Thumb-Balken wie Settings-Slider (kleiner heller Balken, breitere unsichtbare Trefferfläche), Von/Bis-Zahlen unten links/rechts ganz außen
