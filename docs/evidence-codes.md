@@ -17,7 +17,7 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `rules` | `deny_keyword` | Spam | Gesperrtes Schlüsselwort in Betreff oder Text |
 | `authentication` | `auth_pass` | Ham | Plausible SPF/DKIM/DMARC-Pass-Hinweise (untrusted Input, nur schwaches Signal) |
 | `authentication` | `auth_fail` | Spam | SPF/DKIM/DMARC-Fail-Hinweise (untrusted Input) |
-| `authentication` | `brand_aligned_domain` | Ham | Bekannte Marke sendet von ihrer eigenen Domain mit passend ausgerichteter Envelope-Adresse (Return-Path) und bestandener Authentifizierung – DMARC-ähnliches Alignment als Vertrauenssignal |
+| `authentication` | `brand_aligned_domain` | Ham | Bekannte Marke sendet von ihrer eigenen Domain mit passend ausgerichteter Envelope-Adresse (Return-Path) und bestandener Authentifizierung – DMARC-ähnliches Alignment als Vertrauenssignal. Markendomains kommen aus der kleinen eingebauten Liste plus der CC0-Wikidata-Exportliste (`internal/classifier/data/legit_domains.txt`, ~10.900 Domains) |
 | `content` | `pressure_language` | Spam | Druck- oder Drohformulierung (sofort handeln, Sperrung, letzte Warnung …) |
 | `content` | `reward_bait` | Spam | Lockangebot (Gewinn, Geschenk, Bonus, „Sie gehören zu den …“) |
 | `content` | `verification_request` | Spam | Aufforderung, Identität/Zugangsdaten zu bestätigen oder zu aktualisieren |
@@ -30,7 +30,7 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
 | `sender_integrity` | `spoofed_sender` | Spam | Eingehende Mail gibt die eigene Kontodomain als Absender an – sehr wahrscheinlich gefälscht (Spoofing, z. B. Sextortion) |
 | `sender_integrity` | `sender_mismatch` | Spam | Return-Path (Envelope) weicht vom From-Header ab – Spoofing-Hinweis. Nicht gewertet wird DMARC-ähnliches Alignment: Subdomains voneinander und Domains derselben bekannten Marke (z. B. google.com/googlemail.com) gelten als passend; Mailinglisten sind ausgenommen |
-| `sender_integrity` | `brand_impersonation` | Spam | Absenderdomain enthält eine bekannte Marke (PayPal, ADAC, Telekom …), ohne deren eigene Domain zu sein |
+| `sender_integrity` | `brand_impersonation` | Spam | Absenderdomain enthält eine bekannte Marke (PayPal, ADAC, Telekom …), ohne deren eigene Domain zu sein. Neben der eingebauten Liste werden ~1.400 Markentokens aus den CC0-Wikidata-Exporten geprüft (`internal/classifier/data/brand_tokens.txt`, generiert mit `cmd/brandlist`); Domains der Positivliste werden vorher ausgenommen |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |

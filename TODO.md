@@ -7,7 +7,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 ### ⚠️ Verifizierung aus Nutzer-Feedback (Testpostfach)
 
 - [ ] Nach dem nächsten „Neu prüfen“ kontrollieren: authentifizierte Markenmail (z. B. `businessprofile-noreply@google.com`) muss trotz KI-Votum „spam“ bei ~3–5 % liegen. Ursache der vorherigen 50 %: der KI-Blend hob den Regel-Score trotz starken Vertrauenssignals an; der Lift ist jetzt bei `StrongTrustSignal` komplett blockiert (Floor-Skip allein reichte nicht). Test: `TestModelCannotFloorLiftTrustedBrandMail` (< 10 %).
-- [ ] Erkennungsrate beobachten: Die Wikidata-Markendomain-Liste (TODO unten, CC0) ist erst als Evaluierung erfasst und noch NICHT eingebaut – Lookalikes wie `de-autokitdadacde.com` (56 %) sollen darüber und über den Lernfilter weiter steigen, ohne dass Nutzerdomains hartkodiert werden.
+- [ ] Erkennungsrate beobachten: Die Wikidata-Markendomain-Liste (CC0) ist jetzt eingebaut (`cmd/brandlist` → `internal/classifier/data/`) – Lookalikes wie `de-autokitdadacde.com` (56 %) sollen darüber und über den Lernfilter weiter steigen, ohne dass Nutzerdomains hartkodiert werden; Wirkung im Testpostfach prüfen.
 
 ### ⚠️ Testmodus (temporär – vor Release zurückbauen)
 
@@ -54,7 +54,8 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
   - ⚠️ Lizenz ist **CC-BY-SA-4.0** (nicht MIT, wie vermutet): ShareAlike-Pflicht bei Übernahme/Veröffentlichung eines abgeleiteten Datensatzes plus Namensnennung; kommerzielle Nutzung erlaubt, aber Copyleft-Folgewirkungen für eine ausgelieferte Kopie der Liste müssen vor Übernahme juristisch bewertet werden
   - Alternativen Weg prüfen: Liste nur als Recherche-/Inspirationsquelle nutzen und eine eigene, kleine Liste allgemein bekannter Marken führen (Fakten wie „Marke X gehört Domain Y“ sind urheberrechtlich dünn), statt den Datensatz zu kopieren
   - Repo-Aktivität ist gering (4 Commits, 0 Stars): Aktualität und Wartung vor jeder Übernahme prüfen; nur mit dokumentierter Herkunft und Version einbauen
-- [ ] Wikidata-Exporte als Basis einer großen legitimen Markendomain-Liste evaluieren (✅ Lizenz **CC0 1.0** – kommerziell frei, keine Namensnennung, kein ShareAlike; die sauberste der verfügbaren Quellen)
+- [x] Wikidata-Exporte als Basis einer großen legitimen Markendomain-Liste evaluieren (✅ Lizenz **CC0 1.0** – kommerziell frei, keine Namensnennung, kein ShareAlike; die sauberste der verfügbaren Quellen)
+  - ✅ Eingebaut (2026-09-24): `go run ./cmd/brandlist -world <world.json> -ger <ger.json>` erzeugt `internal/classifier/data/legit_domains.txt` (10.915 Domains inkl. Parent-Expansion, ohne `co.uk`-artige Leaks) und `brand_tokens.txt` (1.410 Tokens; nur Einzelwort-Labels ≥ 6 Zeichen, die in der eigenen Domain vorkommen, minus Stoppwortliste); Einbettung per `go:embed` in `internal/classifier/branddata.go`; erweitert `isCanonicalBrand`/`brand_aligned_domain`, `impersonatedBrand`/`brand_impersonation` und `sameBrand`/Envelope-Alignment; Herkunft (Quelle, Lizenz, Datum, Query) steht als Header in den generierten Dateien; Tests in `branddata_test.go`
   - Vom Nutzer bereitgestellte SPARQL-Exporte (liegen lokal unter `C:\Users\User\Desktop\`, nicht im Repo):
     - `query_World_First_5000.json` – 5.000 Unternehmen weltweit (`company`, `companyLabel`, `website`)
     - `query_GER_First_10000.json` – 10.000 deutsche Unternehmen/Marken (`item`, `itemLabel`, `website`; Typen: Unternehmen Q783794, Business Q4830453, Marke Q431289; Land Q183; offizielle Website P856; mit deutschem Wikipedia-Artikel)

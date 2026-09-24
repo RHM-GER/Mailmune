@@ -233,6 +233,11 @@ var brandTokens = []struct {
 }
 
 func impersonatedBrand(senderDomain string) (string, bool) {
+	// Domains of known brands (built-in list or Wikidata export) are never
+	// impersonating themselves or anyone else.
+	if isCanonicalBrand(senderDomain) {
+		return "", false
+	}
 	for _, brand := range brandTokens {
 		if !strings.Contains(senderDomain, brand.token) {
 			continue
@@ -248,11 +253,20 @@ func impersonatedBrand(senderDomain string) (string, bool) {
 			return brand.token, true
 		}
 	}
+	// Extended brand list derived from the CC0 Wikidata company export.
+	ensureBrandData()
+	for _, brand := range derivedBrandTokens {
+		if strings.Contains(senderDomain, brand.token) {
+			return brand.token, true
+		}
+	}
 	return "", false
 }
 
 // isCanonicalBrand reports whether the domain is one of a known brand's own
 // domains (or a subdomain thereof), e.g. google.com or accounts.google.com.
+// Besides the small built-in list this includes the Wikidata-derived export
+// of legitimate company/brand domains (CC0, see data/legit_domains.txt).
 func isCanonicalBrand(senderDomain string) bool {
 	for _, brand := range brandTokens {
 		for _, own := range brand.own {
@@ -261,7 +275,7 @@ func isCanonicalBrand(senderDomain string) bool {
 			}
 		}
 	}
-	return false
+	return isLegitCompanyDomain(senderDomain)
 }
 
 // envelopeAligned implements DMARC-style relaxed alignment between the From
@@ -282,7 +296,10 @@ func envelopeAligned(fromDomain, returnPath string) bool {
 
 // sameBrand reports whether both domains belong to the same known brand.
 func sameBrand(first, second string) bool {
-	for _, brand := range brandTokens {
+	match := func(brand struct {
+		token string
+		own   []string
+	}) bool {
 		fm, sm := false, false
 		for _, own := range brand.own {
 			if first == own || strings.HasSuffix(first, "."+own) {
@@ -292,7 +309,19 @@ func sameBrand(first, second string) bool {
 				sm = true
 			}
 		}
-		if fm && sm {
+		return fm && sm
+	}
+	for _, brand := range brandTokens {
+		if match(struct {
+			token string
+			own   []string
+		}(brand)) {
+			return true
+		}
+	}
+	ensureBrandData()
+	for _, brand := range derivedBrandTokens {
+		if match(brand) {
 			return true
 		}
 	}
