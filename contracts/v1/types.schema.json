@@ -30,10 +30,11 @@
     },
     "MailboxProfile": {
       "type": "object",
-      "required": ["purpose", "industry", "languages", "expectedMailTypes", "trustedDomains", "trustedSenders", "wantedNewsletters", "legitimateAutomated"],
+      "required": ["purpose", "industry", "context", "languages", "expectedMailTypes", "trustedDomains", "trustedSenders", "wantedNewsletters", "legitimateAutomated"],
       "properties": {
         "purpose": { "type": "string" },
         "industry": { "type": "string" },
+        "context": { "type": "string", "description": "Freitext des Besitzers: ungewöhnliche, aber legitime Mails und Besonderheiten. Hauptquelle der KI-Profilkompilierung." },
         "languages": { "type": "array", "items": { "type": "string" } },
         "expectedMailTypes": { "type": "array", "items": { "type": "string" } },
         "trustedDomains": { "type": "array", "items": { "type": "string" } },
@@ -290,6 +291,52 @@
         "confirmed": { "type": "integer", "minimum": 0 },
         "rejected": { "type": "integer", "minimum": 0 },
         "missed": { "type": "integer", "minimum": 0, "description": "Nicht erkannt: Spam, den ein Mensch oder Fremdfilter einsortiert hat, obwohl Mailmune ihn nicht flaggte." }
+      },
+      "additionalProperties": false
+    },
+    "ProfileIndicators": {
+      "description": "KI-kompilierte Indikator-Sets pro Postfach: Erwartungsthemen (senken den Score) und profilspezifische Fremdkampagnen (heben ihn). Nur Literal-Terme, strikt begrenzt, bei der Kompilierung validiert.",
+      "type": "object",
+      "properties": {
+        "expectedTopics": { "type": "array", "maxItems": 24, "items": { "type": "string", "minLength": 2, "maxLength": 40 } },
+        "unexpectedTopics": {
+          "type": "array", "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["name", "terms"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 60 },
+              "terms": { "type": "array", "minItems": 2, "maxItems": 12, "items": { "type": "string", "minLength": 2, "maxLength": 40 } }
+            },
+            "additionalProperties": false
+          }
+        },
+        "notes": { "type": "string", "maxLength": 500 }
+      },
+      "additionalProperties": false
+    },
+    "ProfileModel": {
+      "description": "Persistiertes Ergebnis der KI-Profilkompilierung: Prompt fuer das lokale Modell plus Indikatoren fuer die deterministischen Regeln. sourceHash markiert Veraltung nach Profiltext-Aenderungen.",
+      "type": "object",
+      "required": ["accountId", "sourceHash", "compiledAt", "model", "prompt", "indicators", "enabled"],
+      "properties": {
+        "accountId": { "type": "string" },
+        "sourceHash": { "type": "string" },
+        "compiledAt": { "type": "string" },
+        "model": { "type": "string" },
+        "prompt": { "type": "string", "maxLength": 4000 },
+        "indicators": { "$ref": "#/$defs/ProfileIndicators" },
+        "enabled": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ProfileModelResponse": {
+      "description": "Antwort von GET /v1/accounts/{id}/profile/model: model ist null, wenn noch nie kompiliert wurde; stale=true means Profiltext und Kompilat passen nicht mehr zusammen.",
+      "type": "object",
+      "required": ["model", "stale"],
+      "properties": {
+        "model": { "oneOf": [{ "$ref": "#/$defs/ProfileModel" }, { "type": "null" }] },
+        "stale": { "type": "boolean" }
       },
       "additionalProperties": false
     },

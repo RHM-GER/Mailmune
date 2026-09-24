@@ -55,6 +55,10 @@ type AccountConfig struct {
 type MailboxProfile struct {
 	Purpose             string   `json:"purpose"`
 	Industry            string   `json:"industry"`
+	// Context ist der Freitext aus der Einrichtung („Weitere Beschreibung“):
+	// ungewöhnliche, aber legitime Mails, Besonderheiten des Postfachs. Er ist
+	// die Hauptquelle für die KI-Kompilierung der Profil-Indikatoren.
+	Context             string   `json:"context"`
 	Languages           []string `json:"languages"`
 	ExpectedMailTypes   []string `json:"expectedMailTypes"`
 	TrustedDomains      []string `json:"trustedDomains"`
@@ -64,6 +68,39 @@ type MailboxProfile struct {
 	DeniedKeywords      []string `json:"deniedKeywords"`
 	WantedNewsletters   []string `json:"wantedNewsletters"`
 	LegitimateAutomated []string `json:"legitimateAutomated"`
+}
+
+// UnexpectedTopic ist eine vom lokalen Modell kompilierte Kampagnenkategorie,
+// die für DIESES Postfachprofil nicht erwartet wird (z. B. „Diät-Pillen“ für
+// eine Design-Agentur). Die Terme sind generische Muster, vom Nutzer im
+// Profiltext beschrieben und von der KI abgeleitet – keine harten Blocklisten.
+type UnexpectedTopic struct {
+	Name  string   `json:"name"`
+	Terms []string `json:"terms"`
+}
+
+// ProfileIndicators ist der Regel-Teil der KI-Profilkompilierung: erwartete
+// Themen (senken den Score bei Treffer) und unerwartete Kampagnenkategorien
+// (heben ihn bei Treffer). Alles Literal-Substring-Muster, strikt begrenzt
+// und bei der Kompilierung validiert; niemals Regex oder Code.
+type ProfileIndicators struct {
+	ExpectedTopics   []string          `json:"expectedTopics,omitempty"`
+	UnexpectedTopics []UnexpectedTopic `json:"unexpectedTopics,omitempty"`
+	Notes            string            `json:"notes,omitempty"`
+}
+
+// ProfileModel ist das persistierte, versionierte Ergebnis einer
+// KI-Profilkompilierung pro Postfach: der Profil-Prompt für das lokale Modell
+// plus die Indikator-Sets für die deterministischen Regeln. SourceHash
+// markiert das Kompilat als veraltet, sobald sich der Profiltext ändert.
+type ProfileModel struct {
+	AccountID  string            `json:"accountId"`
+	SourceHash string            `json:"sourceHash"`
+	CompiledAt time.Time         `json:"compiledAt"`
+	Model      string            `json:"model"`
+	Prompt     string            `json:"prompt"`
+	Indicators ProfileIndicators `json:"indicators"`
+	Enabled    bool              `json:"enabled"`
 }
 
 type AttachmentMetadata struct {

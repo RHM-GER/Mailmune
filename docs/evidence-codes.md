@@ -27,10 +27,14 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `content` | `server_marked_spam` | Spam | Der Eingangs-Server hat die Mail bereits als Spam markiert (Betreff-Marker wie `*** Spam ***`, `[Spam]`, `Spam:`) |
 | `content` | `blackmail_threat` | Spam | Erpressung/Sextortion: Drohung mit Veröffentlichung von Video/Fotos oder Kontakt zur Familie |
 | `sender_integrity` | `sender_digit_pattern` | Spam | Absenderdomain mit langen Ziffernfolgen (≥ 4) – maschinell erzeugt |
-| `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil) |
+| `sender_integrity` | `machine_generated_domain` | Spam | Domain-Label wirkt automatisch zusammengesetzt (überlang + Ziffern oder niedriger Vokalanteil). Reine Rechtsform-Segmente (GmbH, AG, …) zählen nicht mit, damit echte Firmendomains wie `mittelstand-gmbh.de` nicht getroffen werden |
 | `sender_integrity` | `spoofed_sender` | Spam | Eingehende Mail gibt die eigene Kontodomain als Absender an – sehr wahrscheinlich gefälscht (Spoofing, z. B. Sextortion) |
 | `sender_integrity` | `sender_mismatch` | Spam | Return-Path (Envelope) weicht vom From-Header ab – Spoofing-Hinweis. Nicht gewertet wird DMARC-ähnliches Alignment: Subdomains voneinander und Domains derselben bekannten Marke (z. B. google.com/googlemail.com) gelten als passend; Mailinglisten sind ausgenommen |
 | `sender_integrity` | `brand_impersonation` | Spam | Absenderdomain enthält eine bekannte Marke (PayPal, ADAC, Telekom …), ohne deren eigene Domain zu sein. Neben der eingebauten Liste werden ~1.400 Markentokens aus den CC0-Wikidata-Exporten geprüft (`internal/classifier/data/brand_tokens.txt`, generiert mit `cmd/brandlist`); Domains der Positivliste werden vorher ausgenommen |
+| `content` | `spam_vertical_content` | Spam | Inhalt passt zu einer generischen Massen-Spam-Kampagnenkategorie (Diät/Gesundheit, Krypto-Investment, Potenz, Krankenkassen-Lockangebote, Wallet-KYC, Kaltakquise mit Förder-Versprechen). Absenderunabhängiges Kampagnen-Vokabular, höchste Kategorie zählt einmal |
+| `profile` | `profile_mismatch` | Spam | Kampagnentreffer UND keinerlei inhaltliche Überschneidung mit dem hinterlegten Postfachprofil (≥ 3 aussagekräftige Profilwörter nötig). Feuert nie ohne Kampagnentreffer – ungewöhnliche, aber legitime Post bleibt unangetastet |
+| `profile` | `profile_topic_match` | Ham | Inhalt trifft ≥ 2 KI-kompilierte Erwartungsthemen dieses Postfachs (`profile_models`, aus dem Profiltext generiert, in den Postfach-Einstellungen einsehbar/deaktivierbar) |
+| `profile` | `profile_offtopic_campaign` | Spam | Inhalt trifft eine KI-kompilierte, profilspezifische Fremdkampagne (≥ 2 Term-Treffer oder 1 sehr spezifischer langer Term). Literal-Substring-Matching, strikt validiert und begrenzt – niemals Regex/Code |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |

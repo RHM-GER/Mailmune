@@ -61,6 +61,9 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("POST /v1/accounts/{id}/models", s.setAccountModel)
 	mux.HandleFunc("POST /v1/accounts/{id}/models/validate", s.validateAccountModel)
 	mux.HandleFunc("POST /v1/accounts/{id}/learning/reset", s.resetLearning)
+	mux.HandleFunc("POST /v1/accounts/{id}/profile/compile", s.compileProfile)
+	mux.HandleFunc("GET /v1/accounts/{id}/profile/model", s.profileModel)
+	mux.HandleFunc("POST /v1/accounts/{id}/profile/model/enabled", s.setProfileModelEnabled)
 	mux.HandleFunc("GET /v1/accounts/{id}/export", s.exportTransfer)
 	mux.HandleFunc("GET /v1/events", s.events)
 	// The event stream must never be cut off by the global write timeout.
@@ -122,6 +125,38 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) exportTransfer(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.ExportTransfer(r.Context(), r.PathValue("id"), r.URL.Query().Get("kind"))
 	respond(w, "export_failed", value, err)
+}
+
+// compileProfile regeneriert das KI-Profilmodell (Prompt + Indikatoren) aus
+// dem aktuellen Profiltext. Kann dauern (ein voller LLM-Aufruf).
+func (s *Server) compileProfile(w http.ResponseWriter, r *http.Request) {
+	value, err := s.service.CompileAccountProfile(r.Context(), r.PathValue("id"))
+	respond(w, "profile_compile_failed", value, err)
+}
+
+func (s *Server) profileModel(w http.ResponseWriter, r *http.Request) {
+	model, found, stale, err := s.service.AccountProfileModel(r.Context(), r.PathValue("id"))
+	if err != nil {
+		respond(w, "profile_model_failed", nil, err)
+		return
+	}
+	var payload any
+	if found {
+		payload = model
+	}
+	respond(w, "profile_model_failed", map[string]any{"model": payload, "stale": stale}, nil)
+}
+
+func (s *Server) setProfileModelEnabled(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err)
+		return
+	}
+	err := s.service.SetProfileModelEnabled(r.Context(), r.PathValue("id"), request.Enabled)
+	respond(w, "profile_model_failed", map[string]bool{"ok": err == nil}, err)
 }
 func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.Accounts(r.Context())

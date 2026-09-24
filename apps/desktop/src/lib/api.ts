@@ -86,6 +86,8 @@ export interface Account {
   profile: {
     purpose: string
     industry: string
+    /** Freitext des Besitzers: ungewöhnliche, aber legitime Mails, Besonderheiten. */
+    context: string
     languages: string[]
     expectedMailTypes: string[]
     trustedDomains: string[]
@@ -96,6 +98,24 @@ export interface Account {
     wantedNewsletters: string[]
     legitimateAutomated: string[]
   }
+}
+
+/** KI-kompilierte Indikator-Sets eines Postfachprofils (Literal-Terme). */
+export interface ProfileIndicators {
+  expectedTopics?: string[]
+  unexpectedTopics?: Array<{ name: string; terms: string[] }>
+  notes?: string
+}
+
+/** Persistiertes Ergebnis der KI-Profilkompilierung pro Postfach. */
+export interface ProfileModel {
+  accountId: string
+  sourceHash: string
+  compiledAt: string
+  model: string
+  prompt: string
+  indicators: ProfileIndicators
+  enabled: boolean
 }
 
 export function isTauri() {
@@ -227,6 +247,19 @@ export function stats(days = 400, accountId?: string | null): Promise<DailyStat[
  */
 export function exportTransfer(accountId: string, kind: "learning" | "profile"): Promise<Record<string, unknown>> {
   return agentRequest<Record<string, unknown>>("GET", `/v1/accounts/${accountId}/export?kind=${kind}`)
+}
+
+/** Erzeugt das KI-Profilmodell (Prompt + Indikatoren) aus dem Profiltext neu. */
+export function compileProfile(accountId: string): Promise<ProfileModel> {
+  return agentRequest<ProfileModel>("POST", `/v1/accounts/${accountId}/profile/compile`)
+}
+
+export function getProfileModel(accountId: string): Promise<{ model: ProfileModel | null; stale: boolean }> {
+  return agentRequest<{ model: ProfileModel | null; stale: boolean }>("GET", `/v1/accounts/${accountId}/profile/model`)
+}
+
+export function setProfileModelEnabled(accountId: string, enabled: boolean): Promise<{ ok: boolean }> {
+  return agentRequest<{ ok: boolean }>("POST", `/v1/accounts/${accountId}/profile/model/enabled`, { enabled })
 }
 
 /**

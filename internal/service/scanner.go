@@ -285,6 +285,16 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// user's own confirmed learning can still outweigh it. A missing or
 	// broken model never blocks scanning.
 	var scorer classifier.StatisticalScorer
+	// KI-kompilierte Profil-Indikatoren: nur aktiv, wenn sie eingeschaltet
+	// sind UND zum aktuellen Profiltext passen – ein veraltetes Kompilat wird
+	// nie still weiterverwendet (die UI zeigt „veraltet“ und bietet die
+	// Neugenerierung an).
+	var profileIndicators *domain.ProfileIndicators
+	var profilePrompt string
+	if compiled, found, loadErr := s.store.GetProfileModel(ctx, account.ID); loadErr == nil && found && compiled.Enabled && compiled.SourceHash == ProfileSourceHash(account.Profile) {
+		profileIndicators = &compiled.Indicators
+		profilePrompt = compiled.Prompt
+	}
 	// learned is the bounded per-profile context for the optional local model
 	// ("RAG light"): the same confirmed knowledge that drives scoring, built
 	// once per run. It stays nil until the profile has enough confirmed
@@ -295,6 +305,14 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		if spamSignals, hamSignals := combined.TopSignals(8); len(spamSignals)+len(hamSignals) > 0 {
 			learned = &provider.LearnedContext{SpamSignals: spamSignals, HamSignals: hamSignals}
 		}
+	}
+	// Der kompilierte Profil-Prompt wandert zusätzlich in den Modell-Kontext,
+	// damit die KI mit demselben Profilverständnis urteilt wie die Regeln.
+	if profilePrompt != "" {
+		if learned == nil {
+			learned = &provider.LearnedContext{}
+		}
+		learned.ProfilePrompt = profilePrompt
 	}
 
 	// modelErr sammelt den ersten KI-Ausfall dieses Laufs (z. B. Ollama nicht
@@ -312,7 +330,7 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 			message.URLCount = classifier.CountURLs(text)
 		}
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
-		classification := s.rules.ClassifyWithFeatures(message, account.Profile, features, scorer)
+		classification := s.rules.ClassifyFull(message, account.Profile, profileIndicators, features, scorer)
 		s.consultModel(ctx, account, message, &classification, learned, aiAll, &modelErr)
 		action := classifier.Decide(account.SafetyMode, classification)
 		isCandidate := action != classifier.ActionIgnore

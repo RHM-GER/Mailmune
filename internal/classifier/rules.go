@@ -43,6 +43,8 @@ const (
 	CodeSenderDigitPattern   = "sender_digit_pattern"
 	CodeSpamVertical         = "spam_vertical_content"
 	CodeProfileMismatch      = "profile_mismatch"
+	CodeProfileTopicMatch    = "profile_topic_match"
+	CodeProfileOffTopic      = "profile_offtopic_campaign"
 	CodeLocalModelPrefix     = "local_model_"
 )
 
@@ -107,6 +109,12 @@ func (r *Rules) Classify(msg domain.MessageFeatures, profile domain.MailboxProfi
 // ClassifyWithFeatures additionally folds the local statistical learner into
 // the result when a scorer and its feature vector are provided.
 func (r *Rules) ClassifyWithFeatures(msg domain.MessageFeatures, profile domain.MailboxProfile, features map[string]int, scorer StatisticalScorer) domain.Classification {
+	return r.ClassifyFull(msg, profile, nil, features, scorer)
+}
+
+// ClassifyFull ist die vollständige Pipeline inklusive der KI-kompilierten
+// Profil-Indikatoren (nil = keine Kompilierung vorhanden/aktiv).
+func (r *Rules) ClassifyFull(msg domain.MessageFeatures, profile domain.MailboxProfile, indicators *domain.ProfileIndicators, features map[string]int, scorer StatisticalScorer) domain.Classification {
 	evidence := make([]domain.Evidence, 0, 8)
 
 	strongTrust := r.stageTrust(msg, profile, &evidence)
@@ -115,6 +123,7 @@ func (r *Rules) ClassifyWithFeatures(msg domain.MessageFeatures, profile domain.
 	r.stageAuthentication(msg, &evidence)
 	r.stageContent(msg, &evidence)
 	r.stageVerticals(msg, profile, &evidence)
+	r.stageProfileIndicators(msg, indicators, &evidence)
 	r.stageLinks(msg, &evidence)
 	r.stageMailingList(msg, &evidence)
 	r.stageAttachments(msg, &evidence)
@@ -563,6 +572,55 @@ func profileOffTopic(profile domain.MailboxProfile, combined string) bool {
 		}
 	}
 	return true
+}
+
+// stageProfileIndicators wertet die KI-kompilierten Profil-Indikatoren aus
+// (pro Postfach in der DB, erzeugt aus dem Profiltext des Nutzers, jederzeit
+// neu generierbar/deaktivierbar). Erwartungsthemen belegen Relevanz (schwaches
+// Negativ-Signal); profilspezifische Kampagnenkategorien zählen erst bei
+// zwei Term-Treffern oder einem einzelnen sehr spezifischen (langen) Term.
+// Das Kompilat ist validiert und begrenzt, bleibt aber Modell-Output: es wird
+// strikt als Heuristik behandelt, niemals als Block-Grund.
+func (r *Rules) stageProfileIndicators(msg domain.MessageFeatures, indicators *domain.ProfileIndicators, evidence *[]domain.Evidence) {
+	if indicators == nil {
+		return
+	}
+	combined := strings.ToLower(msg.Subject + " " + msg.Text)
+	if len(combined) > 64<<10 {
+		combined = combined[:64<<10]
+	}
+	expectedHits := 0
+	for _, topic := range indicators.ExpectedTopics {
+		term := strings.ToLower(strings.TrimSpace(topic))
+		if len([]rune(term)) < 4 || !strings.Contains(combined, term) {
+			continue
+		}
+		expectedHits++
+		if expectedHits >= 2 {
+			break
+		}
+	}
+	if expectedHits >= 2 {
+		*evidence = append(*evidence, domain.Evidence{Group: "profile", Code: CodeProfileTopicMatch, Weight: -0.25, Summary: "Inhalt trifft KI-kompilierte Erwartungsthemen dieses Postfachprofils"})
+	}
+	for _, group := range indicators.UnexpectedTopics {
+		hits := 0
+		longest := 0
+		for _, term := range group.Terms {
+			normalized := strings.ToLower(strings.TrimSpace(term))
+			if len([]rune(normalized)) < 4 || !strings.Contains(combined, normalized) {
+				continue
+			}
+			hits++
+			if runes := len([]rune(normalized)); runes > longest {
+				longest = runes
+			}
+		}
+		if hits >= 2 || (hits == 1 && longest >= 10) {
+			*evidence = append(*evidence, domain.Evidence{Group: "profile", Code: CodeProfileOffTopic, Weight: 0.35, Summary: "Inhalt passt zur profilspezifischen Fremdkampagne „" + group.Name + "“ (KI-kompiliert)"})
+			break // höchstens ein Kategorie-Beweis, wie bei den eingebauten Vertikalen
+		}
+	}
 }
 
 func (r *Rules) stageLinks(msg domain.MessageFeatures, evidence *[]domain.Evidence) {

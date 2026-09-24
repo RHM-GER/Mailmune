@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, deleteAccount, demoDecisions, demoSummary, emptySummary, exportTransfer, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, calibration, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
@@ -1356,10 +1356,44 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   const [draft, setDraft] = useState(account)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  // KI-Profilmodell: Kompilat-Status (aktiv/veraltet/fehlt) + Generator.
+  const [profileState, setProfileState] = useState<{ model: ProfileModel | null; stale: boolean } | null>(null)
+  const [compiling, setCompiling] = useState(false)
+  const [compileError, setCompileError] = useState("")
   // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
   // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
   // Eingaben mitten im Tippen überschreiben.
-  useEffect(() => { if (open) { setDraft(account); setError("") } }, [open, account.id])
+  useEffect(() => { if (open) { setDraft({ ...account, profile: { ...account.profile, context: account.profile.context ?? "" } }); setError("") } }, [open, account.id])
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    getProfileModel(account.id).then((result) => { if (!cancelled) setProfileState(result) }).catch(() => { if (!cancelled) setProfileState(null) })
+    return () => { cancelled = true }
+  }, [open, account.id])
+  // Generieren speichert zuerst den Profiltext (die Kompilierung arbeitet
+  // serverseitig auf dem gespeicherten Profil), dann kompiliert die KI neu.
+  const generate = async () => {
+    setCompiling(true)
+    setCompileError("")
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: draft })
+      await refresh()
+      const model = await compileProfile(account.id)
+      setProfileState({ model, stale: false })
+    } catch (cause) {
+      setCompileError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setCompiling(false)
+    }
+  }
+  const toggleIndicators = async (enabled: boolean) => {
+    try {
+      await setProfileModelEnabled(account.id, enabled)
+      setProfileState((current) => (current?.model ? { ...current, model: { ...current.model, enabled } } : current))
+    } catch {
+      // UI-Zustand bleibt unverändert; der nächste Dialog-Aufruf lädt neu.
+    }
+  }
   const save = async () => {
     setSaving(true)
     setError("")
@@ -1388,6 +1422,40 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
       </div>
       {status && <p className="text-xs leading-5 text-[#888]">{status}</p>}
       {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
+      <div className="border-t border-white/[0.07] pt-4">
+        <div className="mb-3 flex items-center gap-2"><h3 className="text-sm font-medium">Profil für die KI</h3><InfoTooltip><p>Beschreibe, was in dieses Postfach gehört und was nicht. Die KI kompiliert daraus Erwartungsthemen und profilspezifische Fremdkampagnen für die Filter. Jederzeit änder- und neu generierbar; alles bleibt lokal.</p></InfoTooltip></div>
+        <div className="space-y-3">
+          <Field label="Zweck des Postfachs"><Textarea className="min-h-16 px-3.5 py-2.5" value={draft.profile.purpose} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, purpose: event.target.value } })} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Branche"><Input className="h-12 px-3.5" value={draft.profile.industry} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, industry: event.target.value } })} /></Field>
+            <Field label="Erwartete Mailtypen (kommagetrennt)"><Input className="h-12 px-3.5" value={draft.profile.expectedMailTypes.join(", ")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, expectedMailTypes: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) } })} /></Field>
+          </div>
+          <Field label="Weitere Beschreibung"><Textarea className="min-h-16 px-3.5 py-2.5" placeholder="Ungewöhnliche, aber legitime Mails – und was dieses Postfach niemals erwartet" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
+        </div>
+      </div>
+      <div className="rounded-[10px] border border-white/[0.07] bg-white/[0.02] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-medium text-[#ccc]">KI-Indikatoren</p>
+            {profileState?.model && <Badge variant="outline" className="border-white/10 bg-white/[0.025] text-[#aaa]">{profileState.stale ? "veraltet" : profileState.model.enabled ? "aktiv" : "deaktiviert"}</Badge>}
+          </div>
+          <div className="flex items-center gap-2">
+            {profileState?.model && <CompactOnOff enabled={profileState.model.enabled} onChange={(enabled) => void toggleIndicators(enabled)} label="KI-Indikatoren" />}
+            <Button size="sm" variant="outline" disabled={compiling || saving} onClick={() => void generate()}>{compiling ? "Generiere…" : profileState?.model ? "Neu generieren" : "Mit KI generieren"}</Button>
+          </div>
+        </div>
+        {profileState?.model ? (
+          <div className="mt-3 space-y-2 text-xs leading-5 text-[#888]">
+            {profileState.model.indicators.notes && <p>{profileState.model.indicators.notes}</p>}
+            <div className="flex flex-wrap gap-1.5">{(profileState.model.indicators.expectedTopics ?? []).map((topic) => <span key={topic} className="rounded-md border border-white/10 px-2 py-0.5 text-[#9aa]">{topic}</span>)}</div>
+            {(profileState.model.indicators.unexpectedTopics ?? []).map((group) => <p key={group.name}><span className="text-[#e0a86c]">{group.name}:</span> {group.terms.join(", ")}</p>)}
+            <p className="text-[#666]">Kompiliert am {new Date(profileState.model.compiledAt).toLocaleString("de-DE")} mit {profileState.model.model}. Prompt und Indikatoren liegen lokal in der Datenbank; „Speichern“ des Profiltexts markiert sie als veraltet, bis du neu generierst.</p>
+            {compileError && <p className="text-[#e07a5f]">{compileError}</p>}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs leading-5 text-[#666]">{compileError || "Noch nicht kompiliert – benötigt ein validiertes KI-Modell (siehe KI-Modelle oben)."}</p>
+        )}
+      </div>
     </div>
     <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim()} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
   </DialogContent></Dialog>
@@ -1653,7 +1721,7 @@ function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hi
   const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "" })
   const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: [form.purpose, form.context].filter(Boolean).join(" · "), industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
+  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}

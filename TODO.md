@@ -238,3 +238,14 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Trockenlauf liest ausschließlich und zeigt nachvollziehbare Entscheidungen
 - [ ] Mindestens 100 Entscheidungen wurden manuell geprüft
 - [ ] Keine automatische Verschiebung vor Kalibrierung und ausdrücklicher Aktivierung
+
+## Profil-KI & Scoring (2026-09-25)
+
+- [x] KI-Profil-Compiler: Aus dem frei beschreibbaren Profiltext (Zweck, Branche, erwartete Mailtypen, Freitext „Weitere Beschreibung") generiert das validierte lokale Modell (a) einen Profil-Prompt für die KI-Klassifizierung und (b) Indikator-Sets für die Regelpipeline (Erwartungsthemen = Ham-Signal, profilspezifische Fremdkampagnen = Spam-Signal). Persistiert pro Postfach in `profile_models` (Migration 9), mit Source-Hash gegen Veraltung, in den Postfach-Einstellungen einsehbar/aktivierbar/deaktivierbar und jederzeit neu generierbar. Endpunkte: `POST /v1/accounts/{id}/profile/compile`, `GET .../profile/model`, `POST .../profile/model/enabled`
+- [x] Profil im Postfach-Einstellungen-Dialog editierbar (Zweck/Branche/Mailtypen/Freitext) – erweiterbar/änderbar ohne Neueinrichtung
+- [x] Generische Spam-Vertikalen (absenderunabhängige Kampagnenkategorien: Diät/Gesundheit, Krypto-Investment, Potenz, Krankenkassen-Lockangebote, Wallet-KYC, Kaltakquise) + konservativer profile_mismatch-Abgleich – eindeutiger Kampagnen-Spam landet jetzt ohne manuelle Sonderfälle über der Review-Schwelle
+- [x] machine_generated_domain: Rechtsform-Segmente (GmbH/AG/…) werden vor der Analyse entfernt (Fix für False Positives wie mittelstand-gmbh.de)
+- [x] Ollama-Warnung: Bei konfiguriertem, aber nicht erreichbarem Modell warnt `model.unavailable` pro Scan-Lauf als Benachrichtigung (inkl. OS-Push) – „KI-Filterung ausgefallen – Ollama starten"
+- [ ] Ollama-Autostart/Keep-Alive: Wenn KI aktiviert ist, sollte Mailmune Ollama bei Bedarf selbst starten bzw. dessen Verfügbarkeit überwachen (Windows-Dienst/App-Start), statt auf den Nutzer zu warten
+- [ ] HuggingFace-Spamdatensatz (locuoco/the-biggest-spam-ham-phish-email-dataset-300000, MIT) als Trainings-/Evaluierungskorpus anbinden – beide Wikidata-Exporte (World + GER) sind bereits eingebaut
+- [ ] Kaltakquise-Coaching-Mails (conradyleon-Muster) brauchen bestätigte Reviews, damit der Lernfilter sie übernimmt; Vertikale „Kaltakquise" ist eingebaut, aber ohne Profilabweichung bewusst zurückhaltend gewichtet

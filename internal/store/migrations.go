@@ -226,6 +226,25 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_missed_log_day ON missed_log(received_day)`,
 		},
 	},
+	{
+		id:   9,
+		name: "profile_models",
+		stmts: []string{
+			// KI-kompilierte Profilmodelle: ein Satz Indikatoren + ein Prompt pro
+			// Postfach, erzeugt vom validierten lokalen Modell aus dem Profiltext.
+			// source_hash erkennt veraltete Kompilate nach Profiländerungen;
+			// indicators_json ist strikt validiertes, begrenztes JSON.
+			`CREATE TABLE IF NOT EXISTS profile_models (
+ account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+ source_hash TEXT NOT NULL,
+ compiled_at TEXT NOT NULL,
+ model TEXT NOT NULL,
+ prompt TEXT NOT NULL,
+ indicators_json TEXT NOT NULL,
+ enabled INTEGER NOT NULL DEFAULT 1
+)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {
