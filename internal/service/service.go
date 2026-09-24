@@ -418,6 +418,39 @@ func (s *Service) Stats(ctx context.Context, days int, accountID string) ([]doma
 	return s.store.StatsByReceivedDay(ctx, days, accountID)
 }
 
+// ExportTransfer baut ein portables, selbstbeschreibendes Export-Dokument für
+// den Lern- bzw. Profiltransfer auf einen anderen Rechner. Der Learning-Export
+// enthält ausschließlich den statistischen Lerner (Token-Zählstände, niemals
+// Rohtexte von Nachrichten); der Profilexport zusätzlich das Mailbox-Profil
+// (Regeln/Präferenzen). Ein Import als Gegenstück folgt.
+func (s *Service) ExportTransfer(ctx context.Context, accountID, kind string) (map[string]any, error) {
+	if kind != "learning" && kind != "profile" {
+		return nil, errors.New("kind must be 'learning' or 'profile'")
+	}
+	account, err := s.store.Account(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	export := map[string]any{
+		"app":        "mailmune",
+		"kind":       kind,
+		"version":    1,
+		"exportedAt": time.Now().UTC().Format(time.RFC3339),
+		"account":    account.Name,
+	}
+	model, err := s.store.LoadLearningModel(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if model != nil && model.Trained() > 0 {
+		export["learning"] = model
+	}
+	if kind == "profile" {
+		export["profile"] = account.Profile
+	}
+	return export, nil
+}
+
 func (s *Service) Models(ctx context.Context) ([]string, error) { return s.ollama.Models(ctx) }
 
 // CapabilityTest runs the fixed capability probe set against a local model.

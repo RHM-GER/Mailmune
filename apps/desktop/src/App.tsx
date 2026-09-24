@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, deleteAccount, demoDecisions, demoSummary, emptySummary, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, calibration, deleteAccount, demoDecisions, demoSummary, emptySummary, exportTransfer, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
@@ -1213,7 +1213,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
       </ConnectionCard><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={setIncomingReviewEnabled} onSettings={() => {}} /></div></div>
     </section>
     <section className="min-w-0 space-y-6">
-      <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" /><TransferPlaceholder kind="profile" /><AddAccount refresh={refresh} /></div>}>
+      <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
         {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "test")}>Verbindung testen</Button><Button size="sm" onClick={() => void runAccountAction(account, "scan")}>Jetzt prüfen</Button><Button size="sm" variant="outline" onClick={() => void runAccountAction(account, "resync")}>Neu prüfen</Button></div>{accountStatus[account.id] && <p className="mt-3 text-xs leading-5 text-[#888]">{accountStatus[account.id]}</p>}<AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
@@ -1297,10 +1297,43 @@ function ConnectionSection({ title, tooltip, count, add, children }: { title: st
   return <div><div className="mb-3 flex items-center justify-between"><div><div className="flex items-center gap-2"><h2 className="text-sm font-medium">{title}</h2>{tooltip && <InfoTooltip>{tooltip}</InfoTooltip>}</div><p className="mt-1 text-xs text-[#666]">{count} verbunden</p></div>{add}</div><div className="space-y-3">{children}</div></div>
 }
 
-function TransferPlaceholder({ kind }: { kind: "learning" | "profile" }) {
+function TransferPlaceholder({ kind, accountId }: { kind: "learning" | "profile"; accountId: string | null }) {
   const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
   const learning = kind === "learning"
-  return <><Tooltip><TooltipTrigger render={<Button size="sm" variant="outline" onClick={() => setOpen(true)}>{learning ? "Lerntransfer" : "Profiltransfer"}</Button>} /><TooltipContent side="top">{learning ? "Anonymisierte Lernmerkmale übertragen" : "Vollständiges Lernprofil übertragen"}</TooltipContent></Tooltip><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]"><DialogHeader><DialogTitle>{learning ? "Lerndaten übertragen" : "Profil übertragen"}</DialogTitle><DialogDescription>{learning ? "Überträgt ausschließlich allgemeine, anonymisierte Lernmerkmale ohne Nachrichtentexte oder personenbezogene Daten." : "Überträgt Regeln, Präferenzen und postfachspezifische Lernmerkmale in ein anderes Profil."}</DialogDescription></DialogHeader><div className="space-y-3 py-2"><Label htmlFor={`${kind}-target`}>Zielprofil</Label><Input id={`${kind}-target`} className="h-12 px-3.5" placeholder="Profile durchsuchen" /><div className="rounded-[10px] border border-dashed border-white/10 px-4 py-5 text-center text-xs text-[#666]">Die Profilauswahl und Übertragung werden später angebunden.</div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Schließen</Button></DialogFooter></DialogContent></Dialog></>
+  // Export: portables Dokument vom Agenten holen und über den nativen
+  // Speichern-Dialog ablegen (Browser-Vorschau: regulärer Download).
+  // Der Dialog-Pfad erweitert den fs-Scope automatisch; es braucht keine
+  // dauerhafte Schreibberechtigung.
+  const exportData = async () => {
+    if (!accountId) return
+    setBusy(true)
+    try {
+      const data = await exportTransfer(accountId, kind)
+      const json = JSON.stringify(data, null, 2)
+      const filename = `mailmune-${kind}-${new Date().toISOString().slice(0, 10)}.json`
+      if (isTauri()) {
+        const [{ save }, { writeTextFile }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/plugin-fs")])
+        const path = await save({ defaultPath: filename, filters: [{ name: "JSON", extensions: ["json"] }] })
+        if (path) {
+          await writeTextFile(path, json)
+          setOpen(false)
+        }
+      } else {
+        const url = URL.createObjectURL(new Blob([json], { type: "application/json" }))
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = filename
+        anchor.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch {
+      // Exportfehler still ignorieren; der Transfer bleibt ein optionales Extra.
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <><Tooltip><TooltipTrigger render={<Button size="sm" variant="outline" onClick={() => setOpen(true)}>{learning ? "Lerntransfer" : "Profiltransfer"}</Button>} /><TooltipContent side="top">{learning ? "Anonymisierte Lernmerkmale übertragen" : "Vollständiges Lernprofil übertragen"}</TooltipContent></Tooltip><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]"><DialogHeader><DialogTitle>{learning ? "Lerndaten übertragen" : "Profil übertragen"}</DialogTitle><DialogDescription>{learning ? "Überträgt ausschließlich allgemeine, anonymisierte Lernmerkmale ohne Nachrichtentexte oder personenbezogene Daten." : "Überträgt Regeln, Präferenzen und postfachspezifische Lernmerkmale in ein anderes Profil."}</DialogDescription></DialogHeader><div className="space-y-3 py-2"><Label htmlFor={`${kind}-target`}>Zielprofil</Label><Input id={`${kind}-target`} className="h-12 px-3.5" placeholder="Profile durchsuchen" /><div className="rounded-[10px] border border-dashed border-white/10 px-4 py-5 text-center text-xs text-[#666]">Die direkte Profilauswahl und Übertragung werden später angebunden. „Exportieren“ erstellt eine portable Datei für einen anderen Rechner.</div></div><DialogFooter><Button variant="outline" disabled={busy || !accountId} onClick={() => void exportData()}>{busy ? "Exportiere…" : "Exportieren"}</Button><Button variant="outline" onClick={() => setOpen(false)}>Schließen</Button></DialogFooter></DialogContent></Dialog></>
 }
 
 function ConnectionCard({ icon: Icon, title, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {

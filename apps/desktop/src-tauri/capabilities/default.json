@@ -16,6 +16,8 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "autostart:default",
+    "dialog:default",
+    "fs:default",
     "notification:default",
     "process:default",
     "shell:allow-open",

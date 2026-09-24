@@ -43,17 +43,17 @@ const (
 // Model holds per-token counts for one account. It is not safe for
 // concurrent use; callers serialize access (the store does).
 type Model struct {
-	Version int
+	Version int `json:"version"`
 	// SpamCounts and HamCounts map a token to the number of times it was
 	// seen in confirmed spam / ham messages.
-	SpamCounts map[string]uint64
-	HamCounts  map[string]uint64
+	SpamCounts map[string]uint64 `json:"spamCounts"`
+	HamCounts  map[string]uint64 `json:"hamCounts"`
 	// SpamTokens and HamTokens are the total token occurrences seen.
-	SpamTokens uint64
-	HamTokens  uint64
+	SpamTokens uint64 `json:"spamTokens"`
+	HamTokens  uint64 `json:"hamTokens"`
 	// SpamMessages and HamMessages count trained examples.
-	SpamMessages uint64
-	HamMessages  uint64
+	SpamMessages uint64 `json:"spamMessages"`
+	HamMessages  uint64 `json:"hamMessages"`
 }
 
 // NewModel returns an empty model at the current version.

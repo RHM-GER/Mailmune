@@ -73,7 +73,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] Kalibrierungsmetriken (Precision, Recall, False-Positive-Rate) für den Lernfilter messen (Endpunkt + Automatik-Gate)
 - [x] Opt-in-Import einer externen Lern-Baseline und Offline-Evaluierung gegen das dokumentierte MIT-Datenset (mltool, ohne Auslieferung im Repo)
 - [x] Zurücksetzen des Lernwissens aus der UI (je Postfach; Entscheidungen, E-Mails und importierte Baseline bleiben erhalten)
-- [ ] Export des Lernwissens aus der UI (anonymisiert, mit Herkunft/Version)
+- [x] Export des Lernwissens aus der UI (anonymisiert, mit Herkunft/Version) – ✅ „Exportieren“-Button in Lern-/Profiltransfer-Dialogen; `GET /v1/accounts/{id}/export?kind=learning|profile` liefert ein versioniertes, selbstbeschreibendes Dokument (app/kind/version/exportedAt/account + Token-Zählstände, beim Profiltransfer zusätzlich Mailbox-Profil); Speichern über nativen Dialog (tauri-plugin-dialog + fs), Import-Gegenstück folgt
 - [x] Ollama mit JSON-Schema, Prompt-Injection-Tests, Timeouts und niedriger Parallelität anbinden (nur Loopback, serialisiert, versionierter Prompt)
 - [x] Lokales Modell mit datenschutzsicherem Profil-Kontext versorgen („RAG light": diskriminative Tokens und Absenderdomains aus bestätigten Reviews, niemals Rohtext oder vollständige Adressen, strikt je Postfach)
 - [x] DMARC-ähnliches Envelope-Alignment: authentifizierte Markenmails (eigene Domain + passender Return-Path) erhalten ein starkes Vertrauenssignal; Subdomains und Marken-Geschwister zählen nicht als sender_mismatch; KI-Voten können starke Vertrauenssignale nicht in die Prüfliste heben
@@ -96,7 +96,7 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [ ] Sicherer Standard bleibt höchstens 90 Tage/1.000 Nachrichten
 - [ ] Profiländerungsverlauf und Regelvorschläge mit menschlicher Bestätigung
 - [ ] Lern- und Profildaten zwischen Postfächern übertragen
-  - [ ] Datenschutzgeprüften Export ausschließlich anonymisierter, allgemeiner Lernmerkmale anbieten
+  - [x] Datenschutzgeprüften Export ausschließlich anonymisierter, allgemeiner Lernmerkmale anbieten – ✅ Export enthält nur Token-Zählstände und Profilregeln, niemals Rohtexte, Betreffe oder Absender
   - [ ] Vollständiges Profilpaket mit Regeln, Präferenzen und postfachspezifischen Lernmerkmalen separat exportieren/importieren
   - [ ] Vollständige Profile direkt über ein durchsuchbares Zielpostfach-Dropdown übertragen können
   - [ ] Vor Import Inhalt, Herkunft, Umfang und überschreibende Änderungen anzeigen und ausdrücklich bestätigen lassen

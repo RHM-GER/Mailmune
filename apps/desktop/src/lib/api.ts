@@ -221,6 +221,15 @@ export function stats(days = 400, accountId?: string | null): Promise<DailyStat[
 }
 
 /**
+ * Portables Export-Dokument für Lern-/Profiltransfer (z. B. auf einen anderen
+ * Rechner). Learning enthält nur Token-Zählstände, Profile zusätzlich das
+ * Mailbox-Profil – niemals Rohtexte von Nachrichten.
+ */
+export function exportTransfer(accountId: string, kind: "learning" | "profile"): Promise<Record<string, unknown>> {
+  return agentRequest<Record<string, unknown>>("GET", `/v1/accounts/${accountId}/export?kind=${kind}`)
+}
+
+/**
  * Abonniert den Agent-Eventstream (Scan-Fortschritt, neue Entscheidungen,
  * Kontostatus). Liefert eine Funktion zum Abbestellen. Außerhalb der
  * Desktop-App passiert nichts.

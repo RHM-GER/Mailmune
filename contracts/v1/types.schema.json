@@ -292,6 +292,21 @@
         "missed": { "type": "integer", "minimum": 0, "description": "Nicht erkannt: Spam, den ein Mensch oder Fremdfilter einsortiert hat, obwohl Mailmune ihn nicht flaggte." }
       },
       "additionalProperties": false
+    },
+    "TransferExport": {
+      "description": "Portables Export-Dokument fuer Lern-/Profiltransfer auf einen anderen Rechner. Learning enthaelt nur Token-Zaehlstaende des statistischen Lerners (keine Rohtexte); beim Profiltransfer kommt das Mailbox-Profil dazu.",
+      "type": "object",
+      "required": ["app", "kind", "version", "exportedAt", "account"],
+      "properties": {
+        "app": { "type": "string", "const": "mailmune" },
+        "kind": { "type": "string", "enum": ["learning", "profile"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "exportedAt": { "type": "string", "description": "RFC3339-Zeitstempel (UTC)." },
+        "account": { "type": "string", "description": "Anzeigename des Quellpostfachs." },
+        "profile": { "$ref": "#/$defs/MailboxProfile" },
+        "learning": { "type": "object", "description": "Serialisierter learning.Model (version, spamCounts, hamCounts, spamTokens, hamTokens, spamMessages, hamMessages)." }
+      },
+      "additionalProperties": false
     }
   }
 }

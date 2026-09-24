@@ -61,6 +61,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("POST /v1/accounts/{id}/models", s.setAccountModel)
 	mux.HandleFunc("POST /v1/accounts/{id}/models/validate", s.validateAccountModel)
 	mux.HandleFunc("POST /v1/accounts/{id}/learning/reset", s.resetLearning)
+	mux.HandleFunc("GET /v1/accounts/{id}/export", s.exportTransfer)
 	mux.HandleFunc("GET /v1/events", s.events)
 	// The event stream must never be cut off by the global write timeout.
 	s.http = &http.Server{Handler: s.security(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 32 << 10}
@@ -116,6 +117,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	err := s.service.DeleteAccount(r.Context(), r.PathValue("id"))
 	respond(w, "account_delete_failed", map[string]bool{"ok": err == nil}, err)
+}
+
+func (s *Server) exportTransfer(w http.ResponseWriter, r *http.Request) {
+	value, err := s.service.ExportTransfer(r.Context(), r.PathValue("id"), r.URL.Query().Get("kind"))
+	respond(w, "export_failed", value, err)
 }
 func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.Accounts(r.Context())
