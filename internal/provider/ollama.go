@@ -258,6 +258,9 @@ func (o *Ollama) Embed(ctx context.Context, model string, texts []string) ([][]f
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := o.client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("Embed-Aufruf abgebrochen/Timeout: %v", err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
@@ -293,7 +296,7 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 			"reasonCodes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
 		}, "additionalProperties": false,
 	}
-	raw, err := o.rawGenerate(ctx, model, systemInstruction+"\n"+string(inputJSON), format, 2048)
+	raw, err := o.rawGenerate(ctx, model, systemInstruction+"\n"+string(inputJSON)+"\n/no_think", format, 2048)
 	if err != nil {
 		return ModelVerdict{}, err
 	}
@@ -325,6 +328,11 @@ func (o *Ollama) rawGenerate(ctx context.Context, model, prompt string, format m
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := o.client.Do(req)
 	if err != nil {
+		// Abbruch/Timeout des AUFRUFERS ist kein „Ollama läuft nicht“ – sonst
+		// entstehen Falschmeldungen, wenn z. B. ein Scan abgebrochen wird.
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("KI-Aufruf abgebrochen/Timeout: %v", err)
+		}
 		return "", fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()

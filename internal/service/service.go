@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"fmt"
 	"strings"
 	"time"
@@ -517,8 +518,20 @@ func (s *Service) ValidateAccountModel(ctx context.Context, accountID, model str
 	}
 	report, err := s.ollama.RunCapabilityTest(ctx, model)
 	if err != nil {
+		log.Printf("validate %s: model=%s FEHLER: %v", accountID, model, err)
 		return provider.CapabilityReport{}, account, err
 	}
+	invalid := 0
+	firstErr := ""
+	for _, c := range report.Cases {
+		if !c.Valid {
+			invalid++
+			if firstErr == "" {
+				firstErr = c.Error
+			}
+		}
+	}
+	log.Printf("validate %s: model=%s passed=%t invalid=%d firstErr=%q", accountID, model, report.Passed, invalid, firstErr)
 	account.OllamaModel = model
 	account.OllamaValidated = report.Passed
 	account.UpdatedAt = time.Now().UTC()
