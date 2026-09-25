@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, DailyStat, Decision, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
@@ -1295,26 +1295,25 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     setNotificationThreshold(value)
     localStorage.setItem(`mailmune.notificationThreshold.${activeAccount?.id ?? "global"}`, String(value))
   }
-  // Mail-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
-  // Postfach-Karte: aus dem letzten Scan-Lauf abgeleitet (abgeschlossen oder
-  // laufend = verbunden, fehlgeschlagen = gestört). Alle 60 s geprüft.
-  // WICHTIG: muss NACH der activeAccount-Deklaration stehen (TDZ).
+  // Mail-Verbindungsstatus des aktiven Profils für das Globe-Icon: echter
+  // IMAP-Login über den Test-Endpoint (nicht Scan-Historie – ein frisches
+  // zweites Postfach hat noch keine Scans, ist aber verbunden).
+  // Beim Profilwechsel sofort und danach alle 120 s geprüft.
+  // WICHTIG: erst NACH der activeAccount-Deklaration nutzen.
   const [mailOk, setMailOk] = useState<boolean | null>(null)
   useEffect(() => {
     if (!isTauri() || !activeAccount) { setMailOk(null); return }
     let cancelled = false
     const check = async () => {
       try {
-        const runs = await scanRuns(activeAccount.id, 1)
-        if (cancelled) return
-        const latest = runs?.[0]
-        setMailOk(latest ? latest.status === "completed" || latest.status === "running" || latest.status === "cancelled" : null)
+        await agentRequest<{ supportsIdle: boolean; supportsMove: boolean; folders: string[] }>("POST", `/v1/accounts/${activeAccount.id}/test`)
+        if (!cancelled) setMailOk(true)
       } catch {
         if (!cancelled) setMailOk(false)
       }
     }
     void check()
-    const interval = window.setInterval(() => void check(), 60000)
+    const interval = window.setInterval(() => void check(), 120000)
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [activeAccount?.id])
   // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
@@ -1424,7 +1423,9 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
-        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} titleSuffix={mailOk !== null && account.id === activeAccount?.id ? <AiStatusIcon ok={mailOk} enabled okText="Mailbox verbunden – IMAP erreichbar" badText="Mailbox nicht verbunden – die letzte Prüfung ist fehlgeschlagen" /> : null} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })} />)}
+        {/* Profilkonfiguration = immer nur das AKTIVE Postfach; weitere
+            Profile werden über den Switcher in der Navigation gewechselt. */}
+        {activeAccount && <ConnectionCard key={activeAccount.id} icon={Inbox} title={activeAccount.name} titleSuffix={mailOk !== null ? <AiStatusIcon ok={mailOk} enabled okText="Mailbox verbunden – IMAP erreichbar" badText="Mailbox nicht verbunden – der letzte Verbindungstest ist fehlgeschlagen" /> : null} detail={activeAccount.username} enabled={connectionEnabled[activeAccount.id] ?? activeAccount.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [activeAccount.id]: enabled }))} onSettings={() => setSettingsAccount(activeAccount)} onDelete={() => setDeleteTarget({ kind: "account", id: activeAccount.id, label: activeAccount.name })} />}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
