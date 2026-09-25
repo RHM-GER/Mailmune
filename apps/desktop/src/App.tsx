@@ -1173,6 +1173,10 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const settingsScrollRef = useRef<HTMLDivElement>(null)
   const settingsFade = useScrollFade(settingsScrollRef)
   const { theme, setTheme } = useTheme()
+  // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
+  // Bewusst GANZ OBEN definiert, damit kein Hook/Effect darunter in eine
+  // Temporal Dead Zone greifen kann (hatte die Seite zweimal gecrasht).
+  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   const [mode, setMode] = useState<SafetyMode>(accounts[0]?.safetyMode ?? "safe")
   const [folderName, setFolderName] = useState(accounts[0]?.spamFolder ?? "AI_SPAM_FILTER")
   const [folderDraft, setFolderDraft] = useState(folderName)
@@ -1184,8 +1188,14 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
+  const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
+  // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
+  const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
   // „Bei Posteingang“ = account.enabled serverseitig: pro Profil getrennt und
   // über Neustarts persistent statt nur lokaler Schalterzustand.
+  // WICHTIG: erst NACH der activeAccount-Deklaration (Dependency-Arrays würden
+  // sonst in die Temporal Dead Zone greifen und die Seite crashen).
   useEffect(() => { setIncomingReviewEnabled(activeAccount?.enabled ?? true) }, [activeAccount?.id, activeAccount?.enabled])
   const toggleIncomingReview = async (enabled: boolean) => {
     setIncomingReviewEnabled(enabled)
@@ -1213,12 +1223,6 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     setNotificationThreshold(value)
     localStorage.setItem(`mailmune.notificationThreshold.${activeAccount?.id ?? "global"}`, String(value))
   }
-  const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
-  // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
-  const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
-  // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
-  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   // Mail-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
   // Postfach-Karte: aus dem letzten Scan-Lauf abgeleitet (abgeschlossen oder
   // laufend = verbunden, fehlgeschlagen = gestört). Alle 60 s geprüft.
