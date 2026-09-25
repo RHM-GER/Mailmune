@@ -1846,12 +1846,6 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
             </SelectContent>
           </Select>
           {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier erneut den Fähigkeitstest starten.</p>}</div>}
-          <div>
-            <p className="mb-1.5 text-xs text-[#888]">Lokal installiert</p>
-            {installed.length > 0
-              ? <div className="flex flex-wrap gap-1.5">{installed.map((tag) => <span key={tag} className={`rounded-md border px-2 py-0.5 font-mono text-[11px] ${tag === account.ollamaModel ? "border-white/25 text-[#ccc]" : "border-white/10 text-[#777]"}`}>{tag}</span>)}</div>
-              : <p className="text-xs text-[#666]">{reachable === false ? "Ollama ist nicht erreichbar – bitte starten (ollama serve)." : "Keine Modelle gefunden. In einem Terminal: ollama pull <modell>"}</p>}
-          </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
           </div>

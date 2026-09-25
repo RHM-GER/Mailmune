@@ -353,8 +353,12 @@ func decode(r *http.Request, target any) error {
 	if len(data) > 1<<20 {
 		return errors.New("request body exceeds 1 MiB")
 	}
+	// Unbekannte Felder werden bewusst IGNORIERT (kein DisallowUnknownFields):
+	// Frontend und Agent erscheinen nicht immer im selben Moment (Dev-Läufe,
+	// alte Sidecar-Prozesse). Ein strikter Decoder ließ jede neue Profil-/Konto-
+	// Feldgeneration als "400 unknown field" explodieren, obwohl das Ignorieren
+	// fachlich harmlos ist. Tippfehler in bekannten Feldern meldet Go weiterhin.
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
