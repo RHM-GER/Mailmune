@@ -41,8 +41,10 @@ type SyncOptions struct {
 	FetchText bool
 	// TextLimit bounds the fetched text part in bytes.
 	TextLimit int64
-	// OnProgress reports (processed, estimatedTotal) after each message.
-	OnProgress func(processed, estimatedTotal int)
+	// OnProgress reports (processed, estimatedTotal, folderMessages) after each
+	// message. folderMessages is the exact message count of the folder, so the
+	// UI can explain a capped first-pass window ("newest 1000 of 4321").
+	OnProgress func(processed, estimatedTotal, folderMessages int)
 }
 
 // SyncOutcome is the result of one synchronization run.
@@ -55,6 +57,8 @@ type SyncOutcome struct {
 	Resync    bool
 	Processed int
 	Total     int
+	// FolderMessages is the exact message count of the synced folder.
+	FolderMessages int
 }
 
 // MessageHandler receives every observed message. The text argument is empty
@@ -98,7 +102,7 @@ func (m *Client) syncFolder(ctx context.Context, account domain.AccountConfig, p
 	}
 
 	resync := prev == nil || prev.UIDValidity == 0 || prev.UIDValidity != selected.UIDValidity
-	outcome := &SyncOutcome{UIDValidity: selected.UIDValidity, Resync: resync}
+	outcome := &SyncOutcome{UIDValidity: selected.UIDValidity, Resync: resync, FolderMessages: int(selected.NumMessages)}
 	if prev != nil && !resync {
 		outcome.LastUID = prev.LastUID
 	}
@@ -195,7 +199,7 @@ func (m *Client) consumeFetch(ctx context.Context, client *imapclient.Client, cm
 		}
 		outcome.Processed++
 		if opts.OnProgress != nil {
-			opts.OnProgress(outcome.Processed, outcome.Total)
+			opts.OnProgress(outcome.Processed, outcome.Total, outcome.FolderMessages)
 		}
 	}
 	return outcome, nil

@@ -53,7 +53,10 @@ type ScanEvent struct {
 	Run        domain.ScanRun `json:"run"`
 	Candidates int            `json:"candidates,omitempty"`
 	Moved      int            `json:"moved,omitempty"`
-	Warnings   []string       `json:"warnings,omitempty"`
+	// FolderMessages: exakte Nachrichtenanzahl des Ordners – die UI erklärt
+	// damit begrenzte Erstläufe („neueste 1000 von 4321“) statt „etwa“.
+	FolderMessages int      `json:"folderMessages,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
 }
 
 // minLearningSamples is the minimum number of confirmed examples before the
@@ -202,14 +205,15 @@ func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domai
 	if err != nil {
 		runRow = run
 	}
-	s.publish("scan.finished", ScanEvent{Run: runRow, Candidates: result.candidates, Moved: result.moved, Warnings: result.warnings})
+	s.publish("scan.finished", ScanEvent{Run: runRow, Candidates: result.candidates, Moved: result.moved, FolderMessages: result.folderMessages, Warnings: result.warnings})
 }
 
 type scanResult struct {
-	processed  int
-	candidates int
-	moved      int
-	warnings   []string
+	processed      int
+	candidates     int
+	moved          int
+	folderMessages int
+	warnings       []string
 }
 
 // baselineVirtualMessages bounds how strongly an imported global baseline may
@@ -276,14 +280,14 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		MaxMessages: mailbox.DefaultMaxMessages,
 		Since:       deepSince,
 		FetchText:   true,
-		OnProgress: func(processed, estimatedTotal int) {
+		OnProgress: func(processed, estimatedTotal, folderMessages int) {
 			progressCounter++
 			// Persist every step so crashes lose at most one message of
 			// progress; publish slightly less often to keep the stream calm.
 			_ = s.store.UpdateScanProgress(context.Background(), run.ID, processed, estimatedTotal)
 			if progressCounter%5 == 0 || processed == estimatedTotal {
 				if current, ok, _ := s.store.ScanRun(context.Background(), run.ID); ok {
-					s.publish("scan.progress", ScanEvent{Run: current})
+					s.publish("scan.progress", ScanEvent{Run: current, FolderMessages: folderMessages})
 				}
 			}
 		},
@@ -427,6 +431,9 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	}
 
 	outcome, syncErr := s.mailbox.SyncFolder(ctx, account, password, folder, stateOrNil(prev), opts, handler)
+	if outcome != nil {
+		result.folderMessages = outcome.FolderMessages
+	}
 
 	// Persist sync state only when the run completed or was cancelled after
 	// processing; on unexpected errors the unchanged state forces a retry,

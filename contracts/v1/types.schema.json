@@ -115,6 +115,7 @@
         "run": { "$ref": "#/$defs/ScanRun" },
         "candidates": { "type": "integer", "minimum": 0 },
         "moved": { "type": "integer", "minimum": 0 },
+        "folderMessages": { "type": "integer", "minimum": 0", "description": "Exakte Nachrichtenanzahl des gescannten Ordners; erklärt begrenzte Erstläufe." },
         "warnings": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false

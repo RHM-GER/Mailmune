@@ -53,6 +53,8 @@ export interface ScanEvent {
   run: ScanRun
   candidates?: number
   moved?: number
+  /** Exakte Nachrichtenanzahl des gescannten Ordners. */
+  folderMessages?: number
   warnings?: string[]
 }
 

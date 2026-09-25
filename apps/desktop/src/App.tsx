@@ -229,7 +229,7 @@ export default function App() {
   const activeAccountRef = useRef<string | null>(null)
   const [agentOnline, setAgentOnline] = useState(!isTauri())
   const [dailyStats, setDailyStats] = useState<DailyStat[] | null>(null)
-  const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number } | null>(null)
+  const [scanNotice, setScanNotice] = useState<{ run: ScanEvent["run"]; candidates?: number; folderMessages?: number } | null>(null)
   const scanNoticeTimer = useRef<number | undefined>(undefined)
   // Echte Benachrichtigungen aus dem Eventstream; lokal persistiert, damit die
   // Seite nach einem Neustart nicht leer ist. Demo-Einträge bleiben der
@@ -313,10 +313,10 @@ export default function App() {
       if (event.type === "scan.started" || event.type === "scan.progress") {
         const data = event.data as ScanEvent
         window.clearTimeout(scanNoticeTimer.current)
-        setScanNotice({ run: data.run })
+        setScanNotice({ run: data.run, folderMessages: data.folderMessages })
       } else if (event.type === "scan.finished") {
         const data = event.data as ScanEvent
-        setScanNotice({ run: data.run, candidates: data.candidates })
+        setScanNotice({ run: data.run, candidates: data.candidates, folderMessages: data.folderMessages })
         window.clearTimeout(scanNoticeTimer.current)
         scanNoticeTimer.current = window.setTimeout(() => setScanNotice(null), 8000)
         if (data.run.status === "completed") {
@@ -469,24 +469,64 @@ function showToast(text: string, tone: "error" | "info" = "info", account?: stri
 
 function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([])
+  const [minimized, setMinimized] = useState<Record<number, boolean>>({})
+  const timers = useRef<Record<number, number>>({})
+  const scheduleDismiss = (id: number) => {
+    window.clearTimeout(timers.current[id])
+    timers.current[id] = window.setTimeout(() => {
+      setItems((current) => current.filter((item) => item.id !== id))
+      delete timers.current[id]
+    }, 6000)
+  }
   useEffect(() => {
     const listener = (toast: ToastItem) => {
       setItems((current) => [...current.slice(-3), toast])
-      window.setTimeout(() => setItems((current) => current.filter((item) => item.id !== toast.id)), 6000)
+      scheduleDismiss(toast.id)
     }
     toastListeners.push(listener)
-    return () => { toastListeners = toastListeners.filter((item) => item !== listener) }
+    return () => {
+      toastListeners = toastListeners.filter((item) => item !== listener)
+      Object.values(timers.current).forEach((timer) => window.clearTimeout(timer))
+    }
   }, [])
+  // Minimieren stoppt den Auto-Dismiss (Toast bleibt erhalten), Wiederherstellen
+  // startet ihn neu – lange sichtbare Meldungen liegen so nie im Weg.
+  const minimize = (id: number) => {
+    window.clearTimeout(timers.current[id])
+    delete timers.current[id]
+    setMinimized((current) => ({ ...current, [id]: true }))
+  }
+  const restore = (id: number) => {
+    setMinimized((current) => ({ ...current, [id]: false }))
+    scheduleDismiss(id)
+  }
+  const dismiss = (id: number) => {
+    window.clearTimeout(timers.current[id])
+    delete timers.current[id]
+    setItems((current) => current.filter((item) => item.id !== id))
+  }
+  const visible = items.filter((item) => !minimized[item.id])
+  const hidden = items.filter((item) => minimized[item.id])
   if (items.length === 0) return null
-  return <div className="pointer-events-none fixed bottom-6 right-6 z-[70] flex w-[380px] max-w-[calc(100vw-3rem)] flex-col gap-2">
-    {items.map((toast) => <div key={toast.id} role="status" className={`toast-enter pointer-events-auto rounded-md border px-3.5 py-3 text-xs leading-5 shadow-[0_20px_40px_rgba(0,0,0,.5)] ${toast.tone === "error" ? "border-[#e07a5f]/30 bg-[#2a201d] text-[#e8b4a4]" : "border-white/10 bg-[#242424] text-[#bbb]"}`}>
-      {toast.account && <span className="mb-1 inline-flex rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] text-[#aaa]">{toast.account}</span>}
-      {toast.text}
+  return <div className="pointer-events-none fixed bottom-6 right-6 z-[70] flex w-[380px] max-w-[calc(100vw-3rem)] flex-col items-end gap-2">
+    {visible.map((toast) => <div key={toast.id} role="status" className={`toast-enter pointer-events-auto w-full rounded-md border px-3.5 py-3 text-xs leading-5 shadow-[0_20px_40px_rgba(0,0,0,.5)] ${toast.tone === "error" ? "border-[#e07a5f]/30 bg-[#2a201d] text-[#e8b4a4]" : "border-white/10 bg-[#242424] text-[#bbb]"}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {toast.account && <span className="mb-1 inline-flex rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] text-[#aaa]">{toast.account}</span>}
+          {toast.text}
+        </div>
+        <div className="flex shrink-0 gap-0.5">
+          <button type="button" aria-label="Toast minimieren" onClick={() => minimize(toast.id)} className="rounded p-0.5 text-[#777] transition-colors hover:bg-white/[0.06] hover:text-white"><Minus className="size-3.5" /></button>
+          <button type="button" aria-label="Toast schließen" onClick={() => dismiss(toast.id)} className="rounded p-0.5 text-[#777] transition-colors hover:bg-white/[0.06] hover:text-white"><X className="size-3.5" /></button>
+        </div>
+      </div>
     </div>)}
+    {hidden.length > 0 && <button type="button" onClick={() => hidden.forEach((item) => restore(item.id))} className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-[#242424] px-3 py-1.5 text-[11px] text-[#aaa] shadow-[0_20px_40px_rgba(0,0,0,.5)] transition-colors hover:bg-[#2b2b2b] hover:text-white"><BellDot className="size-3.5" />{hidden.length} minimiert – anzeigen</button>}
   </div>
 }
 
-function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: number } }) {
+function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: number; folderMessages?: number } }) {
+  const [collapsed, setCollapsed] = useState(false)
   const finished = notice.run.status !== "running"
   // Tick once per second while running so the remaining-time estimate counts
   // down live instead of only updating on each progress event.
@@ -518,16 +558,25 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
     ? notice.run.status === "completed"
       ? `${notice.run.processed} Nachrichten geprüft · ${notice.candidates ?? 0} Verdachtsfälle · nichts verschoben`
       : notice.run.error || "Der Lauf wurde nicht abgeschlossen."
-    : notice.run.estimatedTotal > 0
-      ? `${notice.run.processed} von etwa ${notice.run.estimatedTotal} Nachrichten gelesen${eta ? ` · verbleibend ~${eta}` : ""}`
+    : (notice.folderMessages ?? 0) > 0 || notice.run.estimatedTotal > 0
+      ? `${notice.run.processed} von ${notice.run.estimatedTotal || notice.folderMessages} Nachrichten gelesen${(notice.folderMessages ?? 0) > notice.run.estimatedTotal ? ` (Ordner enthält insgesamt ${notice.folderMessages})` : ""}${eta ? ` · verbleibend ~${eta}` : ""}`
       : `${notice.run.processed} Nachrichten gelesen`
+  if (collapsed) {
+    return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
+      <button type="button" onClick={() => setCollapsed(false)} aria-label="Prüffortschritt anzeigen" className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-[#232323] px-3 py-1.5 text-[11px] text-[#aaa] shadow-xl transition-colors hover:bg-[#2b2b2b] hover:text-white">
+        <span className={`size-2 rounded-full ${finished ? "" : "toast-pulse"}`} style={{ background: indicator }} />
+        {finished ? title : `${notice.run.processed}/${notice.run.estimatedTotal || notice.folderMessages || "…"}`}
+      </button>
+    </div>
+  }
   return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
     <div role="status" className="flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
       <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${finished ? "" : "toast-pulse"}`} style={{ background: indicator }} />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-1 text-xs leading-5 text-[#888]">{detail}</p>
       </div>
+      {!finished && <button type="button" onClick={() => setCollapsed(true)} aria-label="Prüffortschritt minimieren" className="shrink-0 rounded-md p-1 text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white"><Minus className="size-3.5" /></button>}
     </div>
   </div>
 }
