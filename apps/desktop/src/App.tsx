@@ -2071,9 +2071,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]">
         <DialogHeader><DialogTitle>KI-Modell</DialogTitle><DialogDescription>Modell wählen, Installation prüfen und den Fähigkeitstest für {account.name} ausführen.</DialogDescription></DialogHeader>
         <div className="space-y-3 py-2">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="model-select">Modell wählen <span className="font-normal text-[#666]">(Empfehlungen)</span></Label>
-            <button type="button" aria-label="Empfehlungen anzeigen" onClick={() => setRecsOpen(true)} className="flex size-6 items-center justify-center rounded-md border border-white/10 bg-white/[0.05] text-[#a8a8a8] transition-colors hover:bg-white/[0.08] hover:text-white"><Plus className="size-3.5" /></button>
+          <div>
+            <Label htmlFor="model-select">Modell wählen</Label>
+            <button type="button" onClick={() => setRecsOpen(true)} aria-label="Empfehlungen anzeigen" className="ml-1.5 text-sm font-normal text-[#666] transition-colors hover:text-[#999]">(Empfehlungen <Plus className="mb-0.5 inline size-3.5" />)</button>
           </div>
           <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
             <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
@@ -2083,6 +2083,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
               {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}</SelectItem>)}
             </SelectContent>
           </Select>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
+          </div>
           <div className="space-y-2 border-t border-white/[0.07] pt-3">
             <div className="flex items-center gap-2"><Label>Embedding-Modell (Fast-Pfad)</Label><InfoTooltip><p>Embedding-Modelle (z. B. qwen3-embedding:0.6b) erzeugen Vektoren statt Text: Jede Mail wird gegen importierte Spam-/Ham-Zentroide verglichen – eine eigene Signalgruppe, schnell und ohne Generierung. Die Zentroide werden einmalig per mltool embed aus einem lokalen Korpus importiert.</p></InfoTooltip></div>
             <Select value={account.embeddingModel || "none"} onValueChange={(value) => { if (value) void applyEmbeddingModel(value === "none" ? "" : value) }} disabled={busy}>
