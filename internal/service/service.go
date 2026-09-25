@@ -273,6 +273,12 @@ func (s *Service) StartScan(ctx context.Context, accountID string, resync bool) 
 	return s.scanner.StartScan(ctx, accountID, resync)
 }
 
+// StartScanSince startet einen Komplett-Rescan, der auf Nachrichten ab dem
+// angegebenen Datum begrenzt ist (Zero-Time = alles).
+func (s *Service) StartScanSince(ctx context.Context, accountID string, since time.Time) (domain.ScanRun, error) {
+	return s.scanner.StartScanSince(ctx, accountID, since)
+}
+
 // StartDeepScan triggers the weekly AI deep scan manually: every message
 // since the last deep scan (default window 7 days) is re-read and reviewed
 // with the validated local model.

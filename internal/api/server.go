@@ -183,7 +183,8 @@ func (s *Server) testAccount(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) startScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Resync bool `json:"resync"`
+		Resync bool   `json:"resync"`
+		Since  string `json:"since"`
 	}
 	if r.ContentLength > 0 {
 		if err := decode(r, &req); err != nil {
@@ -191,7 +192,29 @@ func (s *Server) startScan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	value, err := s.service.StartScan(r.Context(), r.PathValue("id"), req.Resync)
+	// Optionales Datum: Komplett-Rescan nur für Nachrichten ab diesem Tag
+	// (RFC3339 oder YYYY-MM-DD). Leer = alles.
+	var since time.Time
+	if req.Since != "" {
+		parsed, err := time.Parse(time.RFC3339, req.Since)
+		if err != nil {
+			parsed, err = time.Parse("2006-01-02", req.Since)
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", errors.New("since must be RFC3339 or YYYY-MM-DD"))
+			return
+		}
+		since = parsed
+	}
+	var (
+		value domain.ScanRun
+		err   error
+	)
+	if !since.IsZero() {
+		value, err = s.service.StartScanSince(r.Context(), r.PathValue("id"), since)
+	} else {
+		value, err = s.service.StartScan(r.Context(), r.PathValue("id"), req.Resync)
+	}
 	respond(w, "scan_start_failed", value, err)
 }
 

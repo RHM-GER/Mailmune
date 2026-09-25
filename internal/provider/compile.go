@@ -23,7 +23,7 @@ WORK BY INFERENCE - do not just copy words out of the profile:
 - "expectedTopics" must be this DERIVED, concrete vocabulary (nouns, compound nouns, short phrases), covering the everyday mail the owner described. Abstract profile words alone are not enough.
 - From the business type AND the owner's explicit never-expect text, derive the mass-mailing campaign categories that can never be legitimate for this mailbox (for example diet products, crypto investment schemes, potency ads, sweepstakes, fake insurer giveaways, medication offers, unsolicited coaching/agency cold mail). For each category list the concrete literal indicator terms such campaigns actually use in subject lines and bodies.
 - If the owner's never-expect text names a category explicitly (e.g. "cold acquisition"), build a dedicated group for it with terms such campaigns use (e.g. unsolicited praise of their work, offering to send something "unverbindlich", referral to state subsidies, first-contact phrasing).
-Strict rules for all terms: literal substrings only (no regex, no wildcards); generic campaign or business vocabulary; never person names; never the profile's own domains or partners; never single common words that legitimately appear in normal business mail. Every term must be specific enough that a hit is strong evidence.
+Strict rules for all terms: literal substrings only (no regex, no wildcards); NEVER repeat a term; every term must be a word or short phrase that LITERALLY APPEARS in subject lines or bodies of such campaign mails - concrete product and offer vocabulary (e.g. "Wunschgewicht", "Bitcoin verdoppeln", "Reifenwechsel", "kostenlos testen"), NOT category labels and NOT invented compounds that no real mail would ever contain (things like "Privat-Angebot" or "TV-Produkt" are forbidden). Infer what such mails actually SAY. Terms must be generic to the campaign type, never person names, never the profile's own domains or partners, never single common words that legitimately appear in normal business mail. Every term must be specific enough that a hit is strong evidence.
 Respond in German with strict JSON only: {"prompt": string, "expectedTopics": [string], "unexpectedTopics": [{"name": string, "terms": [string]}], "notes": string}
 - "prompt": one short paragraph (max 800 chars) for an email classifier describing this mailbox: which concrete topics/senders are expected and which content is clearly foreign.
 - "expectedTopics": 10-24 derived terms (2-40 chars each).
@@ -117,29 +117,42 @@ func ParseCompiledProfile(raw string) (CompiledProfile, error) {
 
 	out := CompiledProfile{}
 	out.Prompt = clean(bounded(parsed.Prompt, 4000))
+	seenTopics := map[string]bool{}
 	for _, topic := range parsed.ExpectedTopics {
 		if len(out.Indicators.ExpectedTopics) >= 24 {
 			break
 		}
-		if topic = clean(topic); validTerm(topic) {
+		topic = clean(topic)
+		key := strings.ToLower(topic)
+		if validTerm(topic) && !seenTopics[key] {
+			seenTopics[key] = true
 			out.Indicators.ExpectedTopics = append(out.Indicators.ExpectedTopics, topic)
 		}
 	}
+	seenGroups := map[string]bool{}
 	for _, group := range parsed.UnexpectedTopics {
 		if len(out.Indicators.UnexpectedTopics) >= 8 {
 			break
 		}
 		name := clean(bounded(group.Name, 60))
+		if name == "" || seenGroups[strings.ToLower(name)] {
+			continue // leere oder doppelte Gruppe verwerfen
+		}
+		seenGroups[strings.ToLower(name)] = true
 		terms := make([]string, 0, len(group.Terms))
+		seenTerms := map[string]bool{}
 		for _, term := range group.Terms {
 			if len(terms) >= 12 {
 				break
 			}
-			if term = clean(term); validTerm(term) {
+			term = clean(term)
+			key := strings.ToLower(term)
+			if validTerm(term) && !seenTerms[key] {
+				seenTerms[key] = true
 				terms = append(terms, term)
 			}
 		}
-		if name == "" || len(terms) < 2 {
+		if len(terms) < 2 {
 			continue // unbrauchbare Gruppe verwerfen
 		}
 		out.Indicators.UnexpectedTopics = append(out.Indicators.UnexpectedTopics, domain.UnexpectedTopic{Name: name, Terms: terms})

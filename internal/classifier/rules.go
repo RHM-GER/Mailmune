@@ -43,6 +43,8 @@ const (
 	CodeSenderDigitPattern   = "sender_digit_pattern"
 	CodeSpamVertical         = "spam_vertical_content"
 	CodeProfileMismatch      = "profile_mismatch"
+	CodeFakeEndorsement      = "fake_endorsement"
+	CodeTvShowAbuse          = "tv_show_domain_abuse"
 	CodeProfileTopicMatch    = "profile_topic_match"
 	CodeProfileOffTopic      = "profile_offtopic_campaign"
 	CodeLocalModelPrefix     = "local_model_"
@@ -52,7 +54,7 @@ var (
 	// Generic pressure/threat language (German + English).
 	urgencyTerms = regexp.MustCompile(`(?i)(sofort handeln|dringend|konto gesperrt|gesperrt|sperrung|letzte warnung|letztmalig|läuft ab|frist (läuft|endet)|zahlung fehlgeschlagen|fehlgeschlagene zahlung|ungewöhnliche aktivität|act now|urgent|immediately|suspended|final notice|last warning)`)
 	// Reward/bait language.
-	rewardTerms = regexp.MustCompile(`(?i)(gewinn|gewonnen|lotterie|glücklich|glücks|gratis|kostenlos|geschenk|überraschung wartet|bonus|prämie|exklusiv (für|nur)|sie gehören zu den|jackpot|cashback|erstattung|gutschein wartet)`)
+	rewardTerms = regexp.MustCompile(`(?i)(gewinn|gewonnen|lotterie|glücklich|glücks|gratis|kostenlos|geschenk|überraschung wartet|(eine |ihre )?überraschung für sie|paket (ist |steht )?(für sie )?bereit|auto-paket|bonus|prämie|exklusiv (für|nur)|sie gehören zu den|jackpot|cashback|erstattung|gutschein wartet)`)
 	// Requests to confirm identity or credentials.
 	verifyTerms = regexp.MustCompile(`(?i)(bestätigen sie|bitte bestätigen|identität bestätigen|identität verifizieren|verifizieren sie|konto aktualisieren|daten aktualisieren|angaben aktualisieren|passwort bestätigen|klicken sie (hier|unten)|jetzt anmelden und|confirm (your|now)|verify (your|now)|update (your|now))`)
 	// Financial pressure patterns.
@@ -79,10 +81,17 @@ var (
 	// nutzerspezifischen Blocklisten. Die Formulierungen sind absichtlich
 	// kampagnentypisch gewählt (Mehrwort-Kombinationen, Anpreisungen), damit
 	// normale Fach-/Privatpost nicht zufällig trifft.
-	dietHealthTerms = regexp.MustCompile(`(?i)(bauchfett|(schnell|einfach|mühelos|leicht) abnehmen|abnehmen (ohne|leicht|schnell)|(diät|darm|detox)[- ]?(spray|gummis|gummies|pillen|kapseln|kur|diät|tropfen)|keto[- ]?gummies|ozempic|semaglutid|mounjaro|mounjaslim|glp-?1|medicare[- ]?kit|wundermittel|geheimwaffe gegen|fettverbrenn|schlank (in|ohne|werden)|wohlgefühl)`)
+	dietHealthTerms = regexp.MustCompile(`(?i)(bauchfett|(schnell|einfach|mühelos|leicht) abnehmen|abnehmen (ohne|leicht|schnell)|(diät|darm|detox)[- ]?(spray|gummis|gummies|pillen|kapseln|kur|diät|tropfen)|keto[- ]?gummies|ozempic|semaglutid|mounjaro|mounjaslim|glp-?1|medicare[- ]?kit|wundermittel|geheimwaffe gegen|fettverbrenn|schlank (in|ohne|werden)|wohlgefühl|(besser|wieder|gesund|tiefer) schlafen|schlaf (verdient|komfort|qualität)|durchschlafen|ein- und durchschlafen)`)
 	cryptoInvestTerms = regexp.MustCompile(`(?i)(bitcoin[- ]?(anlage|investment|handel|spark)?|krypto[- ]?(investment|anlage|handel)|mit krypto|crypto[- ]?(investment|trading)|day[- ]?trading|trading[- ]?(bot|system|software|plattform)|anleger (werden|erhalten|profitieren)|vermögen (aufbauen|verdoppeln|vermehren)|rendite von|250 (eur|€|dollar|usd)|einstieg verpasst|geldstress|anlageberater (ruft|meldet)|finanzielle freiheit|passives einkommen|systemtreffern|klug investieren|geld kommt täglich|mit (erfolg|system) (investieren|anlegen)|ai für sie arbeiten|gewinn(e|system) (mit|durch) (ki|ai|crypto|krypto))`)
 	potencyTerms = regexp.MustCompile(`(?i)(potenz|erektion|libido|viagra|standvermögen|ausdauernder (sex|liebhaber)|spontaner, ausdauernder|(wieder|mehr|puren?) lust|knistern|glied vergröß|(sexuell|sex) (leistung|aktiver|ausdauer)|bettnachbarin|mach sie (völlig )?sprachlos|voll auskosten|länger (durchhalten|im bett)|befriedigender sex)`)
-	insurerBaitTerms = regexp.MustCompile(`(?i)((medicare|krankenkasse|krankenversicherung|gesundheitsvorteil|zahnzusatz|bonusprogramm).{0,80}(kostenlos|gratis|geschenk|bereit|wartet|bestätigt|auswahl wurde|vorteil|kit|testen|versand))|((kostenlos testen|gratis|geschenk|ihre auswahl wurde bestätigt|wartet auf sie|bereit zum versand).{0,80}(medicare|krankenkasse|gesundheitsvorteil|zahnzusatz|kit))`)
+	insurerBaitTerms = regexp.MustCompile(`(?i)((medicare|krankenkasse|krankenversicherung|gesundheitsvorteil|zahnzusatz|bonusprogramm).{0,80}(kostenlos|gratis|geschenk|bereit|wartet|bestätigt|auswahl wurde|vorteil|kit|testen|versand))|((kostenlos testen|gratis|geschenk|ihre auswahl wurde bestätigt|auswahl wurde bestätigt|wartet auf sie|bereit zum versand|gesundheitsvorteil wartet).{0,80}(medicare|krankenkasse|gesundheitsvorteil|zahnzusatz|kit|bestätigt|bereit|wartet))`)
+	// Prominenten-/Experten-Endorsements und TV-Verweise sind eine eigene
+	// Betrugsmasche („Empfohlen von Dr. Hirschhausen“, „wie im TV gesehen“).
+	fakeEndorsementTerms = regexp.MustCompile(`(?i)(empfohlen (von|bei) (dr\.?|prof\.?|ärzten|experten|medizinern|apothekern)|bekannt aus (tv|fernsehen|presse|medien)|wie (im (tv|fernsehen)|gesehen) (gesehen|vorgestellt)?|im (tv|fernsehen) (gesehen|vorgestellt)|stiftung warentest (hat )?(empfiehlt|getestet|bestätigt)|dr\.? (hirschhausen|nguyen-kim)|fernsehshow|verbraucherschutz (warnt|empfiehlt))`)
+	// Missbrauch bekannter TV-Show-Namen in der ABSENDERDOMAIN („Die Höhle der
+	// Löwen“-Investment-Masche). Offizielle Sender versenden nie von solchen
+	// Domains; Umlaut-Varianten (ö/o/oe) werden abgedeckt.
+	tvShowAbuseTerms = regexp.MustCompile(`(?i)(die.?h(o|oe|ö)hle.?d(e|ä)r.?(l(o|oe|ö)w(e|ä)n)|shark.?tank|dragons?.?den|bauer.?sucht.?frau|dschungel.?camp)`)
 	walletKycTerms = regexp.MustCompile(`(?i)(kyc[- ]?(anforderung|verifizierung|prüfung|pflicht)|wallet[- ]?verifizier|(verifizieren|bestätigen) sie (ihre|jetzt ihre)? ?wallet|wallet (verifizieren|bestätigen|sichern)|(krypto|coin).{0,40}(verifizierung|kyc)|phantom[- ]?wallet)`)
 	coldAcquisitionTerms = regexp.MustCompile(`(?i)(ich habe mir.{0,40}angeschaut|hast du etwas dagegen|haben sie etwas dagegen|darf ich (es |dir |ihnen )?.{0,30}(unverbindlich )?(zusenden|zuschicken|schicken)|unverbindlich (zusenden|zuschicken|zukommen)|förderfähig (aufgesetzt|gemacht|gemeldet)|bis zu \d{1,2} prozent.{0,40}(vom staat|zurück|erstatt|förder)|kosten.{0,20}vom staat zurück)`)
 )
@@ -230,6 +239,12 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 	// is not the brand's own domain (e.g. rfcrecouvpaypal.com).
 	if brand, ok := impersonatedBrand(senderDomain); ok {
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeBrandImpersonation, Weight: 0.5, Summary: "Absenderdomain imitiert eine bekannte Marke (" + brand + ")"})
+	}
+	// Namen bekannter TV-Shows in der Absenderdomain sind ein klassisches
+	// Scam-Muster (Investment-/Produktbetrug „wie im Fernsehen“); offizielle
+	// Sender versenden niemals von solchen Domains.
+	if tvShowAbuseTerms.MatchString(senderDomain) {
+		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeTvShowAbuse, Weight: 0.55, Summary: "Absenderdomain missbraucht den Namen einer bekannten TV-Show (Scam-Muster)"})
 	}
 }
 
@@ -445,6 +460,11 @@ func (r *Rules) stageContent(msg domain.MessageFeatures, evidence *[]domain.Evid
 	}
 	if financialTerms.MatchString(combined) {
 		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeFinancialPressure, Weight: 0.25, Summary: "Finanzielle Druckformulierung (offene Zahlung, Mahnung, Konto)"})
+	}
+	// Fake-Endorsements: erfundene Arzt-/Promi-/TV-Empfehlungen sind ein
+	// generisches Betrugsmerkmal kommerzieller Spam-Wellen.
+	if fakeEndorsementTerms.MatchString(combined) {
+		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeFakeEndorsement, Weight: 0.35, Summary: "Bewerbung mit Prominenten-/Experten-/TV-Endorsement (typisches Betrugsmuster)"})
 	}
 	if doubleBang.MatchString(subject) || uppercaseWord.MatchString(subject) {
 		*evidence = append(*evidence, domain.Evidence{Group: "content", Code: CodeSubjectAnomaly, Weight: 0.15, Summary: "Auffällige Zeichensetzung oder Schreibung im Betreff"})

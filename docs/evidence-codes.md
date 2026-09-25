@@ -35,6 +35,8 @@ Aktionen verlangen mindestens zwei unabhängige Gruppen.
 | `profile` | `profile_mismatch` | Spam | Kampagnentreffer UND keinerlei inhaltliche Überschneidung mit dem hinterlegten Postfachprofil (≥ 3 aussagekräftige Profilwörter nötig). Feuert nie ohne Kampagnentreffer – ungewöhnliche, aber legitime Post bleibt unangetastet |
 | `profile` | `profile_topic_match` | Ham | Inhalt trifft ≥ 2 KI-kompilierte Erwartungsthemen dieses Postfachs (`profile_models`, aus dem Profiltext generiert, in den Postfach-Einstellungen einsehbar/deaktivierbar) |
 | `profile` | `profile_offtopic_campaign` | Spam | Inhalt trifft eine KI-kompilierte, profilspezifische Fremdkampagne (≥ 2 Term-Treffer oder 1 sehr spezifischer langer Term). Literal-Substring-Matching, strikt validiert und begrenzt – niemals Regex/Code |
+| `content` | `fake_endorsement` | Spam | Bewerbung mit erfundenem Prominenten-/Experten-/TV-Endorsement („Empfohlen von Dr. …“, „bekannt aus dem Fernsehen“, „wie im TV gesehen“) – generisches Betrugsmuster |
+| `sender_integrity` | `tv_show_domain_abuse` | Spam | Absenderdomain missbraucht den Namen einer bekannten TV-Show (Die Höhle der Löwen, Shark Tank, …) – offizielle Sender versenden nie von solchen Domains |
 | `links` | `url_shortener` | Spam | Verkürzte Links (bit.ly, tinyurl, …) |
 | `links` | `suspicious_links` | Spam | Ungewöhnlich viele Links |
 | `mailing_list` | `list_unsubscribe` | Ham | Reguläre Mailinglisten-Kopfzeile vorhanden |

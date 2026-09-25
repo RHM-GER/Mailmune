@@ -131,8 +131,8 @@ export async function agentRequest<T>(method: string, path: string, body?: unkno
   return invoke<T>("agent_request", { method, path, body: body ?? null })
 }
 
-export function startScan(accountId: string, resync = false): Promise<ScanRun> {
-  return agentRequest<ScanRun>("POST", `/v1/accounts/${accountId}/scans`, { resync })
+export function startScan(accountId: string, resync = false, since?: string): Promise<ScanRun> {
+  return agentRequest<ScanRun>("POST", `/v1/accounts/${accountId}/scans`, since ? { resync, since } : { resync })
 }
 
 export function cancelScan(accountId: string): Promise<ScanRun> {

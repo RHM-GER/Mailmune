@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
@@ -1148,25 +1148,28 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
   // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
   const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
-  // KI-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
-  // Postfach-Karte: erreichbar + Modell installiert. Alle 30 s geprüft.
+  // Mail-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
+  // Postfach-Karte: aus dem letzten Scan-Lauf abgeleitet (abgeschlossen oder
+  // laufend = verbunden, fehlgeschlagen = gestört). Alle 60 s geprüft.
   // WICHTIG: muss NACH der activeAccount-Deklaration stehen (TDZ).
-  const [aiOk, setAiOk] = useState<boolean | null>(null)
+  const [mailOk, setMailOk] = useState<boolean | null>(null)
   useEffect(() => {
-    if (!isTauri() || !activeAccount?.aiEnabled) { setAiOk(null); return }
+    if (!isTauri() || !activeAccount) { setMailOk(null); return }
     let cancelled = false
     const check = async () => {
       try {
-        const list = await listModels()
-        if (!cancelled) setAiOk(Boolean(activeAccount.ollamaModel && (list ?? []).includes(activeAccount.ollamaModel)))
+        const runs = await scanRuns(activeAccount.id, 1)
+        if (cancelled) return
+        const latest = runs?.[0]
+        setMailOk(latest ? latest.status === "completed" || latest.status === "running" || latest.status === "cancelled" : null)
       } catch {
-        if (!cancelled) setAiOk(false)
+        if (!cancelled) setMailOk(false)
       }
     }
     void check()
-    const interval = window.setInterval(() => void check(), 30000)
+    const interval = window.setInterval(() => void check(), 60000)
     return () => { cancelled = true; window.clearInterval(interval) }
-  }, [activeAccount?.id, activeAccount?.aiEnabled, activeAccount?.ollamaModel])
+  }, [activeAccount?.id])
   // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
   // gelesen. Konten laden aber asynchron und werden nach dem Speichern
   // aktualisiert; ohne diese Synchronisierung zeigt die UI weiter den
@@ -1272,7 +1275,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
-        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} titleSuffix={aiOk !== null && account.id === activeAccount?.id ? <AiStatusIcon ok={aiOk} enabled /> : null} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })} />)}
+        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} titleSuffix={mailOk !== null && account.id === activeAccount?.id ? <AiStatusIcon ok={mailOk} enabled okText="Mailbox verbunden – IMAP erreichbar" badText="Mailbox nicht verbunden – die letzte Prüfung ist fehlgeschlagen" /> : null} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })} />)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
@@ -1454,6 +1457,13 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
   // Lernen zurücksetzen (mit Bestätigung).
   const [resetOpen, setResetOpen] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
+  // „Neu prüfen“ mit Bereichsauswahl: Alles (Standard) oder benutzerdefinierter
+  // Zeitraum über denselben Datumpicker wie die Review-Tabelle.
+  const [rescanOpen, setRescanOpen] = useState(false)
+  const [rescanMode, setRescanMode] = useState<"all" | "custom">("all")
+  const [rescanRange, setRescanRange] = useState<{ from: string; to: string } | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [rescanBusy, setRescanBusy] = useState(false)
   // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
   // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
   // Eingaben mitten im Tippen überschreiben.
@@ -1470,6 +1480,20 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
     getProfileModel(account.id).then((result) => { if (!cancelled) setProfileState(result) }).catch(() => { if (!cancelled) setProfileState(null) })
     return () => { cancelled = true }
   }, [open, account.id])
+  const runRescan = async () => {
+    setRescanBusy(true)
+    try {
+      const since = rescanMode === "custom" && rescanRange ? `${rescanRange.from}T00:00:00Z` : undefined
+      await startScan(account.id, true, since)
+      showToast(since ? `Postfach wird ab ${rescanRange!.from} neu geprüft …` : "Postfach wird komplett neu geprüft …")
+      setRescanOpen(false)
+      await refresh()
+    } catch (cause) {
+      showToast(cause instanceof Error ? cause.message : String(cause), "error")
+    } finally {
+      setRescanBusy(false)
+    }
+  }
   const credentialsChanged = draft.host !== account.host || draft.port !== account.port || draft.username !== account.username
   const save = async () => {
     setSaving(true)
@@ -1534,7 +1558,7 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
       setResetOpen(false)
     }
   }
-  return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
+  return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-hidden border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
     <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle></DialogHeader>
     {/* Bereichs-Tabs: nur so breit wie ihr Inhalt; werden es mehr als in die
         Karte passen, wird der Wrapper zum Scroll-Container. */}
@@ -1567,7 +1591,7 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => onAction("test")}>Verbindung testen</Button>
         <Button size="sm" onClick={() => onAction("scan")}>Jetzt prüfen</Button>
-        <Button size="sm" variant="outline" onClick={() => onAction("resync")}>Neu prüfen</Button>
+        <Button size="sm" variant="outline" onClick={() => setRescanOpen(true)}>Neu prüfen</Button>
       </div>
     </div>}
     {tab === "profile" && <div className="space-y-6 py-2">
@@ -1627,7 +1651,24 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
     </div>
     <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim() || !draft.host.trim() || !draft.username.trim() || (credentialsChanged && !password)} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
   </DialogContent></Dialog>
-  <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[420px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Die gelernten Merkmale aus bestätigten Reviews dieses Postfachs werden gelöscht. Entscheidungen und E-Mails bleiben unverändert; der Filter beginnt bei null zu lernen.</DialogDescription></DialogHeader><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog></>
+  <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[420px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Die gelernten Merkmale aus bestätigten Reviews dieses Postfachs werden gelöscht. Entscheidungen und E-Mails bleiben unverändert; der Filter beginnt bei null zu lernen.</DialogDescription></DialogHeader><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog>
+  <Dialog open={rescanOpen} onOpenChange={setRescanOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[440px]"><DialogHeader><DialogTitle>Neu prüfen</DialogTitle><DialogDescription>Welcher Bereich soll neu gescannt und bewertet werden?</DialogDescription></DialogHeader>
+    <div className="space-y-3 py-2">
+      <div className="space-y-2">
+        <Label>Bereich</Label>
+        <Select value={rescanMode} onValueChange={(value) => { if (value) setRescanMode(value as "all" | "custom") }}>
+          <SelectTrigger className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent>
+        </Select>
+      </div>
+      {rescanMode === "custom" && <button type="button" onClick={() => setPickerOpen(true)} className="flex h-12 w-full items-center justify-between rounded-md border border-white/10 bg-white/[0.05] px-3.5 text-sm text-[#ccc] transition-colors hover:bg-white/[0.08]">
+        <span>{rescanRange ? `${new Date(rescanRange.from).toLocaleDateString("de-DE")} – ${new Date(rescanRange.to).toLocaleDateString("de-DE")}` : "Zeitraum wählen"}</span>
+        <CalendarDays className="size-4 text-[#777]" />
+      </button>}
+    </div>
+    <DialogFooter><Button variant="ghost" onClick={() => setRescanOpen(false)}>Abbrechen</Button><Button disabled={rescanBusy || (rescanMode === "custom" && !rescanRange)} onClick={() => void runRescan()}>{rescanBusy ? "Starte …" : "Neu berechnen"}</Button></DialogFooter>
+  </DialogContent></Dialog>
+  <DateRangeDialog open={pickerOpen} onOpenChange={setPickerOpen} initial={rescanRange} onApply={(picked) => setRescanRange(picked)} /></>
 }
 
 function ConnectionCard({ icon: Icon, title, titleSuffix, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; titleSuffix?: React.ReactNode; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {
@@ -1642,13 +1683,12 @@ function EmptyConnectionCard({ text }: { text: string }) {
   return <div className="flex min-h-20 items-center rounded-[10px] border border-dashed border-white/10 bg-white/[0.015] px-4 text-sm text-[#666]">{text}</div>
 }
 
-// KI-Status-Icon hinter Kontoname und Modellname: globe-check (gedimmt) wenn
-// Ollama erreichbar ist und das Modell lokal installiert ist, globe-x wenn die
-// KI eingeschaltet ist aber nicht funktioniert (Ollama aus, Modell fehlt).
-// Bei ausgeschalteter KI erscheint gar kein Icon.
-function AiStatusIcon({ ok, enabled }: { ok: boolean; enabled: boolean }) {
+// Status-Icon (Globe): gedimmter Haken bei funktionierender Verbindung,
+// GlobeX bei Problemen; bei ausgeschalteter Funktion gar kein Icon. Die
+// Tooltip-Texte sind je Einsatzort (Mailbox vs. KI) konfigurierbar.
+function AiStatusIcon({ ok, enabled, okText = "Verbunden – die KI ist aktiv und einsatzbereit", badText = "Nicht verbunden – Ollama läuft nicht, das Modell fehlt oder ist nicht validiert" }: { ok: boolean; enabled: boolean; okText?: string; badText?: string }) {
   if (!enabled) return null
-  return <Tooltip><TooltipTrigger render={<span className="flex shrink-0 items-center text-[#666]" />}>{ok ? <GlobeCheck className="size-3.5" /> : <GlobeX className="size-3.5" />}</TooltipTrigger><TooltipContent side="top">{ok ? "Verbunden – die KI ist aktiv und einsatzbereit" : "Nicht verbunden – Ollama läuft nicht, das Modell fehlt oder ist nicht validiert"}</TooltipContent></Tooltip>
+  return <Tooltip><TooltipTrigger render={<span className="flex shrink-0 items-center text-[#666]" />}>{ok ? <GlobeCheck className="size-3.5" /> : <GlobeX className="size-3.5" />}</TooltipTrigger><TooltipContent side="top">{ok ? okText : badText}</TooltipContent></Tooltip>
 }
 
 function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () => void }) {

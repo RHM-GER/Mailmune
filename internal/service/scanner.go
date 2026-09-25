@@ -85,7 +85,14 @@ func (s *Scanner) RecoverInterrupted(ctx context.Context) (int64, error) {
 // is true, the stored UID state of the inbox folder is dropped first, so the
 // whole mailbox is re-read (decisions stay deduplicated by idempotency keys).
 func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) (domain.ScanRun, error) {
-	return s.startScan(ctx, accountID, resync, false)
+	return s.startScan(ctx, accountID, resync, false, time.Time{})
+}
+
+// StartScanSince ist ein Komplett-Rescan, der auf Nachrichten ab dem
+// angegebenen Empfangsdatum begrenzt ist (zero = alles). Die UI nutzt das für
+// „Neu prüfen“ mit benutzerdefiniertem Bereich.
+func (s *Scanner) StartScanSince(ctx context.Context, accountID string, since time.Time) (domain.ScanRun, error) {
+	return s.startScan(ctx, accountID, true, false, since)
 }
 
 // StartDeepScan re-reads every message received since the account's last deep
@@ -94,10 +101,10 @@ func (s *Scanner) StartScan(ctx context.Context, accountID string, resync bool) 
 // appointments catch up exactly once: the window always reaches back to the
 // last successful deep scan. Triggered by the weekly schedule or manually.
 func (s *Scanner) StartDeepScan(ctx context.Context, accountID string) (domain.ScanRun, error) {
-	return s.startScan(ctx, accountID, true, true)
+	return s.startScan(ctx, accountID, true, true, time.Time{})
 }
 
-func (s *Scanner) startScan(ctx context.Context, accountID string, resync, deep bool) (domain.ScanRun, error) {
+func (s *Scanner) startScan(ctx context.Context, accountID string, resync, deep bool, since time.Time) (domain.ScanRun, error) {
 	account, err := s.store.Account(ctx, accountID)
 	if err != nil {
 		return domain.ScanRun{}, fmt.Errorf("account not found: %w", err)
@@ -143,7 +150,7 @@ func (s *Scanner) startScan(ctx context.Context, accountID string, resync, deep 
 	s.mu.Unlock()
 
 	s.publish("scan.started", ScanEvent{Run: run})
-	go s.execute(runCtx, entry.done, account, password, run, resync, deep)
+	go s.execute(runCtx, entry.done, account, password, run, resync, deep, since)
 	return run, nil
 }
 
@@ -180,7 +187,7 @@ func (s *Scanner) Wait(accountID string, timeout time.Duration) bool {
 	}
 }
 
-func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool) {
+func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool, since time.Time) {
 	defer close(done)
 	defer func() {
 		s.mu.Lock()
@@ -188,7 +195,7 @@ func (s *Scanner) execute(ctx context.Context, done chan struct{}, account domai
 		s.mu.Unlock()
 	}()
 
-	result := s.scanAccount(ctx, account, password, run, aiAll, deep)
+	result := s.scanAccount(ctx, account, password, run, aiAll, deep, since)
 
 	runRow, _, err := s.store.ScanRun(context.Background(), run.ID)
 	if err != nil {
@@ -235,7 +242,7 @@ func (s *Scanner) buildScorer(ctx context.Context, accountID string) *learning.M
 	}
 }
 
-func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool) scanResult {
+func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig, password string, run domain.ScanRun, aiAll bool, deep bool, since time.Time) scanResult {
 	result := scanResult{}
 	folder := account.InboxFolder
 
@@ -257,6 +264,10 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		if account.LastDeepScanAt != nil && account.LastDeepScanAt.After(deepSince) {
 			deepSince = *account.LastDeepScanAt
 		}
+	}
+	// Benutzerdefinierter Bereich aus der UI überschreibt das Tiefscan-Fenster.
+	if !since.IsZero() {
+		deepSince = since
 	}
 
 	progressCounter := 0

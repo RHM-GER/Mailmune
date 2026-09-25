@@ -156,3 +156,46 @@ func TestThinProfileNeverJudgesOffTopic(t *testing.T) {
 		t.Fatalf("thin profile must not produce profile_mismatch: %+v", classification.Evidence)
 	}
 }
+
+// TestTvShowDomainAbuseAndFakeEndorsement: Die „Höhle der Löwen“-Domain plus
+// Fake-Arzt-Endorsement (echter Fall produktdiehohlederlowen-…) muss klar über
+// der Schwelle landen.
+func TestTvShowDomainAbuseAndFakeEndorsement(t *testing.T) {
+	rules := NewRules()
+	msg := domain.MessageFeatures{
+		From: "tvshow@produktdiehohlederlowen-germassn113sas.de", FromDomain: "produktdiehohlederlowen-germassn113sas.de",
+		Subject: "Jetzt testen oder später bereuen..",
+		Text:    "Empfohlen von Dr. Hirschhausen und Dr. Nguyen-Kim! Bekannt aus dem Fernsehen.",
+	}
+	c := rules.Classify(msg, designProfile)
+	if findCode(c.Evidence, CodeTvShowAbuse) == nil {
+		t.Fatalf("tv-show abuse evidence missing: %+v", c.Evidence)
+	}
+	if findCode(c.Evidence, CodeFakeEndorsement) == nil {
+		t.Fatalf("fake endorsement evidence missing: %+v", c.Evidence)
+	}
+	if c.Score < 0.85 {
+		t.Fatalf("score = %.2f, want >= 0.85", c.Score)
+	}
+}
+
+// TestRewardBaitCoversSurpriseParcelPhrasing: „Eine Überraschung für Sie! Ihr
+// Auto-Paket ist bereit!" muss als Lockangebot zählen.
+func TestRewardBaitCoversSurpriseParcelPhrasing(t *testing.T) {
+	rules := NewRules()
+	msg := domain.MessageFeatures{
+		From: "ange@de-autokitddadacde.com", FromDomain: "de-autokitddadacde.com",
+		Subject: "Eine Überraschung für Sie! Ihr Auto-Paket ist bereit!",
+		Text:    "",
+	}
+	c := rules.Classify(msg, designProfile)
+	if findCode(c.Evidence, CodeRewardBait) == nil {
+		t.Fatalf("reward bait missing: %+v", c.Evidence)
+	}
+	if findCode(c.Evidence, CodeBrandImpersonation) == nil {
+		t.Fatalf("brand impersonation missing: %+v", c.Evidence)
+	}
+	if c.Score < 0.7 {
+		t.Fatalf("score = %.2f, want >= 0.70", c.Score)
+	}
+}
