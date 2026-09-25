@@ -76,6 +76,8 @@ export interface Account {
   spamFolder: string
   safetyMode: SafetyMode
   ollamaModel?: string
+  /** Embedding-Modell für den Fast-Pfad (z. B. qwen3-embedding:0.6b); leer = aus. */
+  embeddingModel?: string
   ollamaValidated: boolean
   /** KI-Hauptschalter: aus = nur Regeln/Lernfilter; an = Ollama wird mitgenutzt und von der App gestartet. */
   aiEnabled: boolean
@@ -313,6 +315,22 @@ export interface LearningBaseline {
 
 export function getBaseline(): Promise<{ baseline: LearningBaseline | null }> {
   return agentRequest<{ baseline: LearningBaseline | null }>("GET", "/v1/learning/baseline")
+}
+
+/** Status des Embedding-Fast-Pfads (konfiguriert + Zentroide bereit?). */
+export interface EmbeddingStatus {
+  configured: boolean
+  model: string
+  ready: boolean
+  dim?: number
+  spamN?: number
+  hamN?: number
+  source?: string
+  license?: string
+}
+
+export function getEmbeddingStatus(accountId: string): Promise<EmbeddingStatus> {
+  return agentRequest<EmbeddingStatus>("GET", `/v1/accounts/${accountId}/embedding/status`)
 }
 
 /**

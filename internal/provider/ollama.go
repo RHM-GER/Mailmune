@@ -182,6 +182,52 @@ func (o *Ollama) Classify(ctx context.Context, model string, msg domain.MessageF
 	return o.generate(ctx, model, input)
 }
 
+// ModelInfo liefert die Modell-Familie via /api/show (z. B. "bert" für
+// Embedding-Modelle, "llama"/"qwen2" für generative). Leer, wenn unbekannt.
+func (o *Ollama) ModelInfo(ctx context.Context, model string) (string, error) {
+	if model == "" {
+		return "", errors.New("model is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/show", strings.NewReader(mustJSON(map[string]any{"name": model})))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("ollama show returned %s: %s", resp.Status, strings.TrimSpace(string(detail)))
+	}
+	var info struct {
+		Details struct {
+			Family string `json:"family"`
+		} `json:"details"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&info); err != nil {
+		return "", err
+	}
+	return strings.ToLower(info.Details.Family), nil
+}
+
+// IsEmbeddingModel erkennt Embedding-Modelle am Namen oder an der Architektur-
+// Familie: sie generieren keinen Text und dürfen nie durch den generativen
+// Pfad (Fähigkeitstest/Klassifizierung) geschickt werden.
+func IsEmbeddingModel(name, family string) bool {
+	lower := strings.ToLower(name)
+	if strings.Contains(lower, "embed") {
+		return true
+	}
+	switch family {
+	case "bert", "mxbert", "nomic-bert", "modernbert", "bert-multilingual":
+		return true
+	}
+	return false
+}
+
 // embedResponse ist die Antwort von Ollama /api/embed.
 type embedResponse struct {
 	Embeddings [][]float64 `json:"embeddings"`
@@ -408,6 +454,12 @@ var capabilityCases = []struct {
 func (o *Ollama) RunCapabilityTest(ctx context.Context, model string) (CapabilityReport, error) {
 	if model == "" {
 		return CapabilityReport{}, errors.New("model is required")
+	}
+	// Embedding-Modelle generieren keinen Text – der Fähigkeitstest (und die
+	// generative Klassifizierung) würde dort nur hängen oder kryptisch
+	// fehlschlagen. Sofort klar benennen, welcher Weg stattdessen gilt.
+	if family, err := o.ModelInfo(ctx, model); err == nil && IsEmbeddingModel(model, family) {
+		return CapabilityReport{}, fmt.Errorf("%q ist ein Embedding-Modell (Familie %q): Es generiert keinen Text und hat deshalb keinen Fähigkeitstest. Embedding-Modelle wirken über den Fast-Pfad (Zentroide) – bitte dort auswählen, nicht als KI-Modell", model, family)
 	}
 	report := CapabilityReport{Model: model, PromptVersion: promptVersion, Passed: true}
 	for _, probe := range capabilityCases {

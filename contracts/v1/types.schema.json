@@ -369,6 +369,22 @@
       },
       "additionalProperties": false
     },
+    "EmbeddingStatus": {
+      "description": "Status des Embedding-Fast-Pfads eines Kontos.",
+      "type": "object",
+      "required": ["configured", "model", "ready"],
+      "properties": {
+        "configured": { "type": "boolean" },
+        "model": { "type": "string" },
+        "ready": { "type": "boolean", "description": "true = Zentroide fuer genau dieses Modell sind importiert." },
+        "dim": { "type": "integer", "minimum": 1 },
+        "spamN": { "type": "integer", "minimum": 0 },
+        "hamN": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string" },
+        "license": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "TransferExport": {
       "description": "Portables Export-Dokument fuer Lern-/Profiltransfer auf einen anderen Rechner. Learning enthaelt nur Token-Zaehlstaende des statistischen Lerners (keine Rohtexte); beim Profiltransfer kommt das Mailbox-Profil dazu.",
       "type": "object",

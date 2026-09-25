@@ -16,6 +16,13 @@ import (
 func fakeOllama(t *testing.T, response func() (int, string)) *Ollama {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /api/show beantwortet der Fake selbst (generative Familie), damit der
+		// Embedding-Guard von RunCapabilityTest nicht jeden Test trifft.
+		if r.URL.Path == "/api/show" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"details":{"family":"llama"}}`))
+			return
+		}
 		status, body := response()
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -164,6 +171,26 @@ func TestParseVerdictExtractsWrappedJSON(t *testing.T) {
 	// Genuinely broken output is still rejected.
 	if _, err := parseVerdict("the model refused to answer"); err == nil {
 		t.Fatal("non-JSON output must be rejected")
+	}
+}
+
+func TestCapabilityRunRejectsEmbeddingModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/show" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"details":{"family":"bert"}}`))
+			return
+		}
+		t.Errorf("unexpected call %s", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	provider, err := NewOllama(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.RunCapabilityTest(context.Background(), "qwen3-embedding:0.6b"); err == nil {
+		t.Fatal("Embedding-Modelle müssen den Fähigkeitstest sofort und erklärnd ablehnen")
 	}
 }
 

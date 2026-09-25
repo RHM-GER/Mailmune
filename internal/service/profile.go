@@ -84,3 +84,24 @@ func (s *Service) AccountProfileModel(ctx context.Context, accountID string) (mo
 func (s *Service) SetProfileModelEnabled(ctx context.Context, accountID string, enabled bool) error {
 	return s.store.SetProfileModelEnabled(ctx, accountID, enabled)
 }
+
+// EmbeddingStatus meldet, ob der Embedding-Fast-Pfad konfiguriert und
+// einsatzbereit ist (Zentroide für genau das gewählte Modell importiert).
+func (s *Service) EmbeddingStatus(ctx context.Context, accountID string) (map[string]any, error) {
+	account, err := s.store.Account(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	status := map[string]any{"configured": account.EmbeddingModel != "", "model": account.EmbeddingModel, "ready": false}
+	if account.EmbeddingModel != "" {
+		if centroids, ok, loadErr := s.store.LoadEmbeddingCentroids(ctx, account.EmbeddingModel); loadErr == nil && ok {
+			status["ready"] = true
+			status["dim"] = centroids.Dim
+			status["spamN"] = centroids.SpamN
+			status["hamN"] = centroids.HamN
+			status["source"] = centroids.Source
+			status["license"] = centroids.License
+		}
+	}
+	return status, nil
+}

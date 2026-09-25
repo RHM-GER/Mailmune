@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, DailyStat, Decision, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getEmbeddingStatus, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, DailyStat, Decision, EmbeddingStatus, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
@@ -459,12 +459,20 @@ function formatDuration(ms: number): string {
 // Minimales Toast-System: Fehler- und Statusmeldungen gehören als Toast
 // angezeigt, nicht als loser Text unter irgendwelchen Karten. showToast ist
 // modulweit verfügbar; der ToastHost hängt einmal im App-Root.
-type ToastItem = { id: number; text: string; tone: "error" | "info"; account?: string }
+type ToastItem = { id: number; text: string; tone: "error" | "info"; account?: string; sticky?: boolean }
 let toastListeners: Array<(toast: ToastItem) => void> = []
+let toastDismissers: Array<(id: number) => void> = []
 let toastCounter = 0
-function showToast(text: string, tone: "error" | "info" = "info", account?: string) {
-  const toast = { id: ++toastCounter, text, tone, account }
+function showToast(text: string, tone: "error" | "info" = "info", account?: string, sticky = false): number {
+  const toast = { id: ++toastCounter, text, tone, account, sticky }
   for (const listener of toastListeners) listener(toast)
+  return toast.id
+}
+
+// Entfernt einen Toast vorzeitig (z. B. den Sticky-„läuft“-Toast, sobald die
+// Operation abgeschlossen ist).
+function dismissToast(id: number) {
+  for (const dismiss of toastDismissers) dismiss(id)
 }
 
 function ToastHost() {
@@ -481,11 +489,24 @@ function ToastHost() {
   useEffect(() => {
     const listener = (toast: ToastItem) => {
       setItems((current) => [...current.slice(-3), toast])
-      scheduleDismiss(toast.id)
+      if (!toast.sticky) scheduleDismiss(toast.id)
+    }
+    const dismisser = (id: number) => {
+      window.clearTimeout(timers.current[id])
+      delete timers.current[id]
+      setItems((current) => current.filter((item) => item.id !== id))
+      setMinimized((current) => {
+        if (!current[id]) return current
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
     }
     toastListeners.push(listener)
+    toastDismissers.push(dismisser)
     return () => {
       toastListeners = toastListeners.filter((item) => item !== listener)
+      toastDismissers = toastDismissers.filter((item) => item !== dismisser)
       Object.values(timers.current).forEach((timer) => window.clearTimeout(timer))
     }
   }, [])
@@ -1864,6 +1885,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [reachable, setReachable] = useState<boolean | null>(null)
   const [toggling, setToggling] = useState(false)
   const [baseline, setBaseline] = useState<LearningBaseline | null>(null)
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null)
 
   const loadModels = async () => {
     try {
@@ -1888,6 +1910,10 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         setRecommended(rec.models ?? [])
         setBaseline(base.baseline ?? null)
         setReachable(true)
+        if (account?.id) {
+          const emb = await getEmbeddingStatus(account.id).catch(() => null)
+          if (!cancelled && emb) setEmbeddingStatus(emb)
+        }
       } catch (error) {
         if (!cancelled) {
           showToast(`Ollama ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`, "error")
@@ -1934,6 +1960,23 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     }
   }
 
+  // Embedding-Modell (Fast-Pfad) getrennt vom generativen KI-Modell: kein
+  // Fähigkeitstest, Wirkung über importierte Zentroide.
+  const applyEmbeddingModel = async (tag: string) => {
+    setBusy(true)
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, embeddingModel: tag } })
+      showToast(tag ? `Embedding-Modell übernommen: ${tag}` : "Embedding-Fast-Pfad ausgeschaltet.")
+      await refresh()
+      const status = await getEmbeddingStatus(account.id).catch(() => null)
+      if (status) setEmbeddingStatus(status)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const choose = (tag: string) => {
     // Nur warnen, wenn ein validiertes Modell im Einsatz war und ersetzt wird.
     if (account.ollamaValidated && account.ollamaModel && account.ollamaModel !== tag) {
@@ -1945,8 +1988,14 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
 
   const validate = async () => {
     if (!selected) return
+    // Embedding-Modelle generativen Tests zu unterziehen hängt nur (Ollama
+    // /api/generate scheitert oder blockiert) – sofort klar benennen.
+    if (/embedding/i.test(selected)) {
+      showToast("Embedding-Modelle haben keinen Fähigkeitstest: Sie wirken über den Fast-Pfad (Zentroide). Bitte unten als Embedding-Modell wählen, nicht hier.", "error")
+      return
+    }
     setBusy(true)
-    showToast("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)")
+    const stickyId = showToast("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)", "info", undefined, true)
     try {
       const result = await validateAccountModel(account.id, selected)
       const invalidCases = result.report.cases.filter((item) => !item.valid)
@@ -1961,6 +2010,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       showToast(error instanceof Error ? error.message : String(error), "error")
     } finally {
       setBusy(false)
+      dismissToast(stickyId)
       void loadModels()
     }
   }
@@ -2047,6 +2097,21 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
           {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier erneut den Fähigkeitstest starten.</p>}</div>}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
+          </div>
+          <div className="space-y-2 border-t border-white/[0.07] pt-3">
+            <div className="flex items-center gap-2"><Label>Embedding-Modell (Fast-Pfad)</Label><InfoTooltip><p>Embedding-Modelle (z. B. qwen3-embedding:0.6b) erzeugen Vektoren statt Text: Jede Mail wird gegen importierte Spam-/Ham-Zentroide verglichen – eine eigene Signalgruppe, schnell und ohne Generierung. Die Zentroide werden einmalig per mltool embed aus einem lokalen Korpus importiert.</p></InfoTooltip></div>
+            <Select value={account.embeddingModel || "none"} onValueChange={(value) => { if (value) void applyEmbeddingModel(value === "none" ? "" : value) }} disabled={busy}>
+              <SelectTrigger className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm"><SelectValue>{(value) => (value === "none" ? "Aus" : value)}</SelectValue></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Aus</SelectItem>
+                {installed.map((tag) => <SelectItem key={`emb-${tag}`} value={tag}>{tag}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {account.embeddingModel
+              ? embeddingStatus?.ready
+                ? <p className="text-xs text-[#666]">Zentroide aktiv: {embeddingStatus.spamN?.toLocaleString("de-DE")} Spam / {embeddingStatus.hamN?.toLocaleString("de-DE")} Ham · Dim {embeddingStatus.dim}</p>
+                : <p className="text-xs text-[#e0a86c]">Keine Zentroide für dieses Modell importiert – der Fast-Pfad bleibt aus, bis mltool embed gelaufen ist.</p>
+              : <p className="text-xs text-[#666]">Empfehlung: ollama pull qwen3-embedding:0.6b</p>}
           </div>
           {baseline && <p className="text-xs leading-5 text-[#666]">Globale Lern-Baseline aktiv: {baseline.corpusRows.toLocaleString("de-DE")} externe Mails ({baseline.license}) wirken als begrenzter Prior neben deinem bestätigten Lernen.</p>}
         </div>

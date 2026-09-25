@@ -64,6 +64,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("POST /v1/accounts/{id}/learning/reset", s.resetLearning)
 	mux.HandleFunc("POST /v1/accounts/{id}/profile/compile", s.compileProfile)
 	mux.HandleFunc("GET /v1/accounts/{id}/profile/model", s.profileModel)
+	mux.HandleFunc("GET /v1/accounts/{id}/embedding/status", s.embeddingStatus)
 	mux.HandleFunc("POST /v1/accounts/{id}/profile/model/enabled", s.setProfileModelEnabled)
 	mux.HandleFunc("GET /v1/accounts/{id}/export", s.exportTransfer)
 	mux.HandleFunc("GET /v1/events", s.events)
@@ -146,6 +147,11 @@ func (s *Server) baselineStatus(w http.ResponseWriter, r *http.Request) {
 		payload = meta
 	}
 	respond(w, "baseline_failed", map[string]any{"baseline": payload}, nil)
+}
+
+func (s *Server) embeddingStatus(w http.ResponseWriter, r *http.Request) {
+	value, err := s.service.EmbeddingStatus(r.Context(), r.PathValue("id"))
+	respond(w, "embedding_status_failed", value, err)
 }
 
 func (s *Server) profileModel(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +336,7 @@ func (s *Server) validateAccountModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 	report, account, err := s.service.ValidateAccountModel(ctx, r.PathValue("id"), req.Model)
 	if err != nil {
