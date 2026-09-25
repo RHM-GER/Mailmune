@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, calibration, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, CalibrationReport, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
@@ -406,6 +406,7 @@ export default function App() {
           {page !== "review" && page !== "settings" && <ScrollFade strength={mainFade} targetRef={mainScrollRef} />}
         </main>
         {scanNotice && <ScanToast notice={scanNotice} />}
+        <ToastHost />
       </div>
     </TooltipProvider>
   )
@@ -421,6 +422,33 @@ function formatDuration(ms: number): string {
   const hours = Math.floor(minutes / 60)
   const restMinutes = minutes % 60
   return restMinutes > 0 ? `${hours} Std ${restMinutes} Min` : `${hours} Std`
+}
+
+// Minimales Toast-System: Fehler- und Statusmeldungen gehören als Toast
+// angezeigt, nicht als loser Text unter irgendwelchen Karten. showToast ist
+// modulweit verfügbar; der ToastHost hängt einmal im App-Root.
+type ToastItem = { id: number; text: string; tone: "error" | "info" }
+let toastListeners: Array<(toast: ToastItem) => void> = []
+let toastCounter = 0
+function showToast(text: string, tone: "error" | "info" = "info") {
+  const toast = { id: ++toastCounter, text, tone }
+  for (const listener of toastListeners) listener(toast)
+}
+
+function ToastHost() {
+  const [items, setItems] = useState<ToastItem[]>([])
+  useEffect(() => {
+    const listener = (toast: ToastItem) => {
+      setItems((current) => [...current.slice(-3), toast])
+      window.setTimeout(() => setItems((current) => current.filter((item) => item.id !== toast.id)), 6000)
+    }
+    toastListeners.push(listener)
+    return () => { toastListeners = toastListeners.filter((item) => item !== listener) }
+  }, [])
+  if (items.length === 0) return null
+  return <div className="pointer-events-none fixed bottom-6 right-6 z-[70] flex w-[380px] max-w-[calc(100vw-3rem)] flex-col gap-2">
+    {items.map((toast) => <div key={toast.id} role="status" className={`toast-enter pointer-events-auto rounded-md border px-3.5 py-3 text-xs leading-5 shadow-[0_20px_40px_rgba(0,0,0,.5)] ${toast.tone === "error" ? "border-[#e07a5f]/30 bg-[#2a201d] text-[#e8b4a4]" : "border-white/10 bg-[#242424] text-[#bbb]"}`}>{toast.text}</div>)}
+  </div>
 }
 
 function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: number } }) {
@@ -1110,7 +1138,25 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [editingFolder, setEditingFolder] = useState(false)
   const [notificationThreshold, setNotificationThreshold] = useState(() => Number(readStoredValue("mailmune.notificationThreshold", "spamalytic.notificationThreshold", "90")))
   const [automaticThreshold, setAutomaticThreshold] = useState(() => Number(readStoredValue("mailmune.automaticSpamThreshold.v2", "spamalytic.automaticSpamThreshold.v2", "90")))
-  const [accountStatus, setAccountStatus] = useState<Record<string, string>>({})
+  // KI-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
+  // Postfach-Karte: erreichbar + Modell installiert. Wird beim Öffnen der
+  // Einstellungen und alle 30 s geprüft.
+  const [aiOk, setAiOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!isTauri() || !activeAccount?.aiEnabled) { setAiOk(null); return }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const list = await listModels()
+        if (!cancelled) setAiOk(Boolean(activeAccount.ollamaModel && (list ?? []).includes(activeAccount.ollamaModel)))
+      } catch {
+        if (!cancelled) setAiOk(false)
+      }
+    }
+    void check()
+    const interval = window.setInterval(() => void check(), 30000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [activeAccount?.id, activeAccount?.aiEnabled, activeAccount?.ollamaModel])
   const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
   const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
@@ -1132,51 +1178,39 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     setFolderName(activeAccount.spamFolder ?? "AI_SPAM_FILTER")
   }, [activeAccount?.id, activeAccount?.safetyMode, activeAccount?.spamFolder])
   const runAccountAction = async (account: Account, action: "test" | "scan" | "resync") => {
-    setAccountStatus((current) => ({ ...current, [account.id]: action === "test" ? "Verbindung wird geprüft …" : action === "resync" ? "Postfach wird komplett neu geprüft …" : "Trockenlauf wird gestartet …" }))
     try {
       if (action === "test") {
+        showToast("Verbindung wird geprüft …")
         const result = await agentRequest<{ supportsIdle: boolean; supportsMove: boolean; folders: string[] }>("POST", `/v1/accounts/${account.id}/test`)
-        setAccountStatus((current) => ({ ...current, [account.id]: `Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}` }))
+        showToast(`Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}`)
       } else {
-        const run = await startScan(account.id, action === "resync")
-        // Der Lauf arbeitet im Agent-Hintergrund; die UI folgt dem
-        // Fortschritt über den Scan-Status und den Eventstream.
-        for (let attempt = 0; attempt < 300; attempt++) {
-          const runs = await scanRuns(account.id)
-          const current = runs.find((item) => item.id === run.id) ?? runs[0]
-          if (!current) break
-          if (current.status === "running") {
-            setAccountStatus((state) => ({ ...state, [account.id]: current.estimatedTotal > 0 ? `${current.processed} von etwa ${current.estimatedTotal} Nachrichten gelesen …` : `${current.processed} Nachrichten gelesen …` }))
-          } else if (current.status === "completed") {
-            setAccountStatus((state) => ({ ...state, [account.id]: `Abgeschlossen · ${current.processed} Nachrichten gelesen · keine automatische Verschiebung` }))
-            await refresh()
-            return
-          } else if (current.status === "cancelled") {
-            setAccountStatus((state) => ({ ...state, [account.id]: "Trockenlauf abgebrochen." }))
-            await refresh()
-            return
-          } else {
-            setAccountStatus((state) => ({ ...state, [account.id]: `Fehlgeschlagen: ${current.error || "unbekannter Fehler"}` }))
-            return
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2000))
-        }
-        setAccountStatus((current) => ({ ...current, [account.id]: "Prüfung läuft weiter – der Fortschritt erscheint im Ereignisstrom." }))
+        showToast(action === "resync" ? "Postfach wird komplett neu geprüft …" : "Prüfung wird gestartet …")
+        await startScan(account.id, action === "resync")
+        // Live-Fortschritt kommt über den Eventstream im globalen ScanToast;
+        // hier nur die Daten einmal nachziehen.
+        await refresh()
       }
     } catch (error) {
-      setAccountStatus((current) => ({ ...current, [account.id]: error instanceof Error ? error.message : "Aktion fehlgeschlagen" }))
+      showToast(error instanceof Error ? error.message : String(error), "error")
     }
   }
   const persistSafetyMode = async (nextMode: SafetyMode) => {
-    setMode(nextMode)
     const account = activeAccount
+    setMode(nextMode)
     if (!account) return
     try {
-      // Sicherheitsmodus gehört zum Konto und wird serverseitig persistiert.
-      await agentRequest("POST", "/v1/accounts", { account: { ...account, safetyMode: nextMode } })
+      // Das Spamverhalten IST die Automatik: „Manuell“ = Trockenlauf (nie
+      // verschieben), „Standard“/„Autonom“ = automatische Verschiebung an.
+      // Der Server verlangt weiterhin bewiesene Kalibrierung, bevor wirklich
+      // verschoben werden darf.
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, safetyMode: nextMode, dryRun: nextMode === "confirm_all" } })
       await refresh()
-    } catch {
-      // Ohne Agent bleibt die lokale Auswahl erhalten.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      showToast(message.includes("automation requires")
+        ? "Automatik braucht Kalibrierung: mindestens 20 bestätigte Reviews mit 99,5 % Präzision. Bis dahin bleibt der Trockenlauf aktiv."
+        : message || "Sicherheitsmodus konnte nicht gespeichert werden", "error")
+      setMode(account.safetyMode ?? "safe")
     }
   }
   // Wochenprüfung = wöchentlicher KI-Tiefscan des Agenten. Der Zeitplan liegt
@@ -1238,7 +1272,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
-        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })}><AutomationPanel account={account} refresh={refresh} /></ConnectionCard>)}
+        {accounts.map((account) => <ConnectionCard key={account.id} icon={Inbox} title={account.name} titleSuffix={aiOk !== null && account.id === activeAccount?.id ? <AiStatusIcon ok={aiOk} enabled /> : null} detail={account.username} enabled={connectionEnabled[account.id] ?? account.enabled} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, [account.id]: enabled }))} onSettings={() => setSettingsAccount(account)} onDelete={() => setDeleteTarget({ kind: "account", id: account.id, label: account.name })} />)}
         {accounts.length === 0 && fakeAccountVisible && <ConnectionCard icon={Inbox} title="STRATO Postfach" detail="kontakt@fliesenbetrieb.de" enabled={connectionEnabled["demo-strato"]} onEnabled={(enabled) => setConnectionEnabled((current) => ({ ...current, "demo-strato": enabled }))} onSettings={() => {}} onDelete={() => setDeleteTarget({ kind: "account", id: "demo-strato", label: "STRATO Postfach" })} />}
         {accounts.length === 0 && (!fakeAccountVisible || accounts.length > 0) && <EmptyConnectionCard text="Noch kein Postfach verbunden." />}
       </ConnectionSection></div>
@@ -1250,9 +1284,9 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     </div></div>
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
     <SectionIndicator items={settingsSections} scrollRef={settingsScrollRef} />
-    {settingsAccount && <MailboxSettingsDialog account={accounts.find((item) => item.id === settingsAccount.id) ?? settingsAccount} open onOpenChange={(open) => { if (!open) setSettingsAccount(null) }} refresh={refresh} onAction={(action) => { const current = accounts.find((item) => item.id === settingsAccount.id); if (current) void runAccountAction(current, action) }} status={accountStatus[settingsAccount.id]} />}
+    {settingsAccount && <MailboxSettingsDialog account={accounts.find((item) => item.id === settingsAccount.id) ?? settingsAccount} open onOpenChange={(open) => { if (!open) setSettingsAccount(null) }} refresh={refresh} onAction={(action) => { const current = accounts.find((item) => item.id === settingsAccount.id); if (current) void runAccountAction(current, action) }} />}
     <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { setFolderName(folderDraft.trim()); setEditingFolder(false) }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
-    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch (error) { setAccountStatus((current) => ({ ...current, [target.id]: `Löschen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}` })) } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
+    <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch (error) { showToast(`Löschen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`, "error") } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
   </div>
 }
 
@@ -1406,23 +1440,20 @@ function LanguageMultiSelect({ value, onChange }: { value: string[]; onChange: (
 // (Identitätscheck host+username), damit kein Doppel-Profil entsteht.
 const mailTypePresets = ["Kundenanfragen", "Lieferanten", "Newsletter", "Automatische Kontomails"]
 
-function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction, status }: { account: Account; open: boolean; onOpenChange: (open: boolean) => void; refresh: () => void; onAction: (action: "test" | "scan" | "resync") => void; status?: string }) {
+function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction }: { account: Account; open: boolean; onOpenChange: (open: boolean) => void; refresh: () => void; onAction: (action: "test" | "scan" | "resync") => void }) {
   const [tab, setTab] = useState("connection")
   const [draft, setDraft] = useState(account)
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
   // KI-Profilmodell: Kompilat-Status (aktiv/veraltet/fehlt) + Generator.
   const [profileState, setProfileState] = useState<{ model: ProfileModel | null; stale: boolean } | null>(null)
   const [compiling, setCompiling] = useState(false)
-  const [compileError, setCompileError] = useState("")
   // Tag-Eingabe für erwartete Mailtypen.
   const [mailTypeDraft, setMailTypeDraft] = useState("")
   // Lernen zurücksetzen (mit Bestätigung).
   const [resetOpen, setResetOpen] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
-  const [resetMessage, setResetMessage] = useState("")
   // Nur beim Öffnen/Profilwechsel synchronisieren: Der 15s-Poll ersetzt das
   // Account-Objekt ständig; ein Reset bei jeder Identitätsänderung würde
   // Eingaben mitten im Tippen überschreiben.
@@ -1431,8 +1462,6 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
     setTab("connection")
     setPassword("")
     setShowPassword(false)
-    setError("")
-    setCompileError("")
     setDraft({ ...account, profile: { ...account.profile, context: account.profile.context ?? "", unexpected: account.profile.unexpected ?? "" } })
   }, [open, account.id])
   useEffect(() => {
@@ -1444,14 +1473,13 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   const credentialsChanged = draft.host !== account.host || draft.port !== account.port || draft.username !== account.username
   const save = async () => {
     setSaving(true)
-    setError("")
     try {
       await agentRequest("POST", "/v1/accounts", { account: draft, ...(password ? { password } : {}) })
       setPassword("")
       await refresh()
       onOpenChange(false)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      showToast(cause instanceof Error ? cause.message : String(cause), "error")
     } finally {
       setSaving(false)
     }
@@ -1461,14 +1489,13 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   // Indikatoren und Prompt neu ab.
   const generate = async () => {
     setCompiling(true)
-    setCompileError("")
     try {
       await agentRequest("POST", "/v1/accounts", { account: draft })
       await refresh()
       const model = await compileProfile(account.id)
       setProfileState({ model, stale: false })
     } catch (cause) {
-      setCompileError(cause instanceof Error ? cause.message : String(cause))
+      showToast(cause instanceof Error ? cause.message : String(cause), "error")
     } finally {
       setCompiling(false)
     }
@@ -1495,40 +1522,43 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
   }
   const doResetLearning = async () => {
     setResetBusy(true)
-    setResetMessage("")
     try {
       const result = await resetLearning(account.id)
-      setResetMessage(result.cleared > 0
-        ? `Lokales Lernen zurückgesetzt: ${result.cleared} bestätigte Beispiele entfernt. Entscheidungen und E-Mails bleiben unverändert.`
+      showToast(result.cleared > 0
+        ? `Lokales Lernen zurückgesetzt: ${result.cleared} bestätigte Beispiele entfernt.`
         : "Kein gespeichertes Lernen zum Zurücksetzen vorhanden.")
     } catch (cause) {
-      setResetMessage(cause instanceof Error ? cause.message : String(cause))
+      showToast(cause instanceof Error ? cause.message : String(cause), "error")
     } finally {
       setResetBusy(false)
       setResetOpen(false)
     }
   }
   return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
-    <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle><DialogDescription>Alles aus der Einrichtung ist hier anpassbar. Speichern ohne neues Passwort lässt das gespeicherte Passwort unangetastet.</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle></DialogHeader>
     {/* Bereichs-Tabs: nur so breit wie ihr Inhalt; werden es mehr als in die
         Karte passen, wird der Wrapper zum Scroll-Container. */}
     <div className="overflow-x-auto py-1">
       <SegmentedControl className="w-fit" ariaLabel="Einstellungsbereiche" options={[{ value: "connection", label: "Verbindung" }, { value: "profile", label: "KI-Profil" }, { value: "behavior", label: "Verhalten" }]} value={tab} onChange={(next) => { if (next) setTab(next) }} />
     </div>
-    {tab === "connection" && <div className="space-y-4 py-2">
+    {/* Feste Inhaltshöhe: Beim Umschalten der Bereiche darf der zentrierte
+        Dialog nicht in der Höhe springen und anders landen. */}
+    <div className="h-[540px] overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+    {tab === "connection" && <div className="space-y-5 py-2">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Anzeigename"><Input className="h-12 px-3.5" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
         <Field label="IMAP-Server"><Input className="h-12 px-3.5" value={draft.host} onChange={(event) => setDraft({ ...draft, host: event.target.value })} /></Field>
         <Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={String(draft.port)} onChange={(event) => setDraft({ ...draft, port: Number(event.target.value.replace(/\D/g, "")) || 0 })} /></Field>
         <Field label="Benutzername"><Input className="h-12 px-3.5" value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} /></Field>
       </div>
-      <Field label={credentialsChanged && !password ? "Neues Passwort (bei geänderten Zugangsdaten erforderlich)" : "Passwort (leer lassen = behalten)"}>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2"><Label>Passwort</Label><InfoTooltip><p>Leer lassen = das gespeicherte Passwort bleibt unverändert. Nur bei neuen Zugangsdaten ausfüllen.</p></InfoTooltip></div>
         <div className="relative">
           <Input type={showPassword ? "text" : "password"} className="h-12 px-3.5 pr-11" autoComplete="new-password" placeholder="••••••••" value={password} onChange={(event) => setPassword(event.target.value)} />
           <button type="button" aria-label={showPassword ? "Passwort verbergen" : "Passwort anzeigen"} onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#777] transition-colors hover:text-white">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
         </div>
-      </Field>
-      {credentialsChanged && <p className="rounded-md border border-[#e0a86c]/30 bg-[#e0a86c]/[0.06] px-3 py-2 text-xs leading-5 text-[#e0a86c]">Zugangsdaten geändert: Das bleibt dasselbe Profil – Lernen, Reviews und Entscheidungen bleiben erhalten. Gib das neue Passwort an; dieselbe Kombination aus Server + Benutzername darf nicht bereits als anderes Postfach verbunden sein (prüft der Server beim Speichern).</p>}
+      </div>
+      {credentialsChanged && <p className="rounded-md border border-[#e0a86c]/30 bg-[#e0a86c]/[0.06] px-3 py-2 text-xs leading-5 text-[#e0a86c]">Zugangsdaten geändert: Bitte neues Passwort eingeben. Profil, Lernen und Reviews bleiben erhalten.</p>}
       <div className="grid grid-cols-3 gap-3">
         <Field label="Posteingang"><Input className="h-12 px-3.5" value={draft.inboxFolder} onChange={(event) => setDraft({ ...draft, inboxFolder: event.target.value })} /></Field>
         <Field label="Gesendet"><Input className="h-12 px-3.5" value={draft.sentFolder} onChange={(event) => setDraft({ ...draft, sentFolder: event.target.value })} /></Field>
@@ -1539,9 +1569,8 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
         <Button size="sm" onClick={() => onAction("scan")}>Jetzt prüfen</Button>
         <Button size="sm" variant="outline" onClick={() => onAction("resync")}>Neu prüfen</Button>
       </div>
-      {status && <p className="text-xs leading-5 text-[#888]">{status}</p>}
     </div>}
-    {tab === "profile" && <div className="space-y-4 py-2">
+    {tab === "profile" && <div className="space-y-6 py-2">
       <div className="flex items-center gap-2"><p className="text-sm font-medium">Infos zum Unternehmen / Postfach</p><InfoTooltip><p>Beschreibe in ganzen Sätzen, was dieses Postfach ist und was hier eintrifft. Die KI leitet daraus AB, welche konkreten Themen, Dokumenttypen und Absenderarten erwartet werden – zum Beispiel ergibt „designt Websites" + „Kundenanfragen": Anfragen zu Websites, Briefings, Logo-Entwürfe, Druck-PDFs, CMS-Begriffe, Hosting-Rechnungen. Sie kopiert nicht nur deine Wörter.</p></InfoTooltip></div>
       <Field label="Zweck des Postfachs"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Angebote und Rechnungen einer Design-Agentur für Websites und Logos" value={draft.profile.purpose} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, purpose: event.target.value } })} /></Field>
       <div className="grid grid-cols-2 gap-3">
@@ -1557,10 +1586,10 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">{mailTypePresets.filter((preset) => !draft.profile.expectedMailTypes.includes(preset)).map((preset) => <button key={preset} type="button" onClick={() => addMailTypeValue(preset)} className="flex items-center gap-1 rounded-md border border-dashed border-white/15 px-2.5 py-1 text-xs text-[#777] transition-colors hover:border-white/30 hover:text-[#ccc]"><Plus className="size-3" />{preset}</button>)}</div>
       </Field>
       <Field label="Ungewöhnlich, aber legitim"><Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Newsletter von Design-Blogs, Rechnungen vom Hosting-Anbieter, Mails von Freelancern" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
-      <Field label="Was erwartest du hier NIEMALS?">
-        <p className="-mt-1 text-xs text-[#666]">Daraus leitet die KI die profilspezifischen Fremdkampagnen ab, die der Filter ausschließen soll.</p>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2"><Label>Was erwartest du hier niemals?</Label><InfoTooltip><p>Daraus leitet die KI die profilspezifischen Fremdkampagnen ab, die der Filter ausschließen soll.</p></InfoTooltip></div>
         <Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Potenzmittel, Kaltakquise von Agenturen" value={draft.profile.unexpected} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, unexpected: event.target.value } })} />
-      </Field>
+      </div>
       <div className="rounded-[10px] border border-white/[0.07] bg-white/[0.02] p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -1577,11 +1606,10 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
             {profileState.model.indicators.notes && <p>{profileState.model.indicators.notes}</p>}
             <div className="flex flex-wrap gap-1.5">{(profileState.model.indicators.expectedTopics ?? []).map((topic) => <span key={topic} className="rounded-md border border-white/10 px-2 py-0.5 text-[#9aa]">{topic}</span>)}</div>
             {(profileState.model.indicators.unexpectedTopics ?? []).map((group) => <p key={group.name}><span className="text-[#e0a86c]">{group.name}:</span> {group.terms.join(", ")}</p>)}
-            <p className="text-[#666]">Kompiliert am {new Date(profileState.model.compiledAt).toLocaleString("de-DE")} mit {profileState.model.model}. Prompt und Indikatoren liegen lokal in der Datenbank; Profiländerungen markieren sie als veraltet, bis du neu generierst.</p>
-            {compileError && <p className="text-[#e07a5f]">{compileError}</p>}
+            <p className="text-[#666]">Kompiliert am {new Date(profileState.model.compiledAt).toLocaleString("de-DE")} · {profileState.model.model} · liegt lokal in der Datenbank</p>
           </div>
         ) : (
-          <p className="mt-2 text-xs leading-5 text-[#666]">{compileError || "Noch nicht kompiliert – benötigt ein validiertes KI-Modell (siehe KI-Modelle oben)."}</p>
+          <p className="mt-2 text-xs leading-5 text-[#666]">Noch nicht kompiliert – benötigt ein validiertes KI-Modell.</p>
         )}
       </div>
     </div>}
@@ -1594,17 +1622,16 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction,
           <div className="flex items-center gap-2"><p className="text-sm font-medium">Lernen zurücksetzen</p><InfoTooltip><p>Entfernt die lokal gelernten Merkmale aus bestätigten Reviews für dieses Postfach. Entscheidungen und E-Mails bleiben unverändert.</p></InfoTooltip></div>
           <Button size="sm" variant="outline" disabled={resetBusy} onClick={() => setResetOpen(true)}>{resetBusy ? "Setze zurück …" : "Zurücksetzen"}</Button>
         </div>
-        {resetMessage && <p className="mt-2 text-xs leading-5 text-[#888]">{resetMessage}</p>}
       </div>
     </div>}
-    {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
+    </div>
     <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button disabled={saving || !draft.name.trim() || !draft.host.trim() || !draft.username.trim() || (credentialsChanged && !password)} onClick={() => void save()}>{saving ? "Speichere…" : "Speichern"}</Button></DialogFooter>
   </DialogContent></Dialog>
   <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[420px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Die gelernten Merkmale aus bestätigten Reviews dieses Postfachs werden gelöscht. Entscheidungen und E-Mails bleiben unverändert; der Filter beginnt bei null zu lernen.</DialogDescription></DialogHeader><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog></>
 }
 
-function ConnectionCard({ icon: Icon, title, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {
-  return <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><div className="flex items-center gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{title}</p><p className="mt-1 truncate text-xs text-[#666]">{detail}</p></div><div className="flex shrink-0 items-center gap-0.5"><button className="flex size-8 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" onClick={onSettings} aria-label={`${title} verwalten`}><Settings className="size-4" /></button>{onDelete && <button className="flex size-8 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" onClick={onDelete} aria-label={`${title} löschen`}><Trash2 className="size-4" /></button>}<CompactOnOff enabled={enabled} onChange={onEnabled} label={title} /></div></div>{children}</div>
+function ConnectionCard({ icon: Icon, title, titleSuffix, detail, enabled, onEnabled, onSettings, onDelete, children }: { icon: typeof Inbox; title: string; titleSuffix?: React.ReactNode; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void; onSettings: () => void; onDelete?: () => void; children?: React.ReactNode }) {
+  return <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><div className="flex items-center gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="flex min-w-0 items-center gap-1.5 text-sm font-medium"><span className="truncate">{title}</span>{titleSuffix}</p><p className="mt-1 truncate text-xs text-[#666]">{detail}</p></div><div className="flex shrink-0 items-center gap-0.5"><button className="flex size-8 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" onClick={onSettings} aria-label={`${title} verwalten`}><Settings className="size-4" /></button>{onDelete && <button className="flex size-8 items-center justify-center rounded-md text-[#666] transition-colors hover:bg-white/[0.05] hover:text-white" onClick={onDelete} aria-label={`${title} löschen`}><Trash2 className="size-4" /></button>}<CompactOnOff enabled={enabled} onChange={onEnabled} label={title} /></div></div>{children}</div>
 }
 
 function CompactOnOff({ enabled, onChange, label }: { enabled: boolean; onChange: (enabled: boolean) => void; label: string }) {
@@ -1629,9 +1656,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [installed, setInstalled] = useState<string[]>([])
   const [recommended, setRecommended] = useState<RecommendedModel[]>([])
   const [selected, setSelected] = useState<string>(account?.ollamaModel ?? "")
-  const [status, setStatus] = useState("")
   const [busy, setBusy] = useState(false)
-  const [ollamaError, setOllamaError] = useState("")
   // Modellwechsel-Warnung: ersetzt ein bereits validiertes, genutztes Modell,
   // muss das erst bestätigt werden (Fähigkeitstest verfällt, Bewertungen
   // können inkonsistent werden).
@@ -1647,10 +1672,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       const [inst, rec] = await Promise.all([listModels(), recommendedModels()])
       setInstalled(inst ?? [])
       setRecommended(rec.models ?? [])
-      setOllamaError("")
       setReachable(true)
     } catch (error) {
-      setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+      showToast(error instanceof Error ? error.message : String(error), "error")
       setReachable(false)
     }
   }
@@ -1667,7 +1691,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         setReachable(true)
       } catch (error) {
         if (!cancelled) {
-          setOllamaError(error instanceof Error ? error.message : "Ollama ist nicht erreichbar. Läuft Ollama lokal?")
+          showToast(`Ollama ist nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`, "error")
           setReachable(false)
         }
       }
@@ -1699,13 +1723,13 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const applyModel = async (tag: string) => {
     setSelected(tag)
     setBusy(true)
-    setStatus("Modell wird übernommen …")
+    showToast("Modell wird übernommen …")
     try {
       await setAccountModel(account.id, tag)
-      setStatus(`Übernommen: ${tag}. Jetzt den Fähigkeitstest ausführen, um es zu aktivieren.`)
+      showToast(`Übernommen: ${tag}. Jetzt den Fähigkeitstest ausführen, um es zu aktivieren.`)
       await refresh()
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Modellübernahme fehlgeschlagen")
+      showToast(error instanceof Error ? error.message : String(error), "error")
     } finally {
       setBusy(false)
     }
@@ -1723,19 +1747,19 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const validate = async () => {
     if (!selected) return
     setBusy(true)
-    setStatus("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)")
+    showToast("Fähigkeitstest läuft … (je nach Modell 1–3 Minuten)")
     try {
       const result = await validateAccountModel(account.id, selected)
       const invalidCases = result.report.cases.filter((item) => !item.valid)
       // Surface the real cause (e.g. "model not found" or the raw output) so a
       // failure is diagnosable instead of an opaque count.
       const firstError = invalidCases.find((item) => item.error)?.error
-      setStatus(result.report.passed
+      showToast(result.report.passed
         ? `Fähigkeitstest bestanden: ${selected} ist aktiviert und analysiert unklare Fälle mit.`
-        : `Fähigkeitstest fehlgeschlagen (${invalidCases.length} ungültige Antworten). Das Modell bleibt deaktiviert.${firstError ? ` Ursache: ${firstError}` : ""}`)
+        : `Fähigkeitstest fehlgeschlagen (${invalidCases.length} ungültige Antworten). Das Modell bleibt deaktiviert.${firstError ? ` Ursache: ${firstError}` : ""}`, result.report.passed ? "info" : "error")
       await refresh()
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Fähigkeitstest fehlgeschlagen")
+      showToast(error instanceof Error ? error.message : String(error), "error")
     } finally {
       setBusy(false)
       void loadModels()
@@ -1747,20 +1771,20 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const toggleAI = async (enabled: boolean) => {
     if (toggling) return
     setToggling(true)
-    setStatus(enabled ? "Ollama wird geprüft und bei Bedarf gestartet …" : "")
     try {
       if (enabled) {
+        showToast("Ollama wird geprüft und bei Bedarf gestartet …")
         const up = await ensureOllamaRunning()
         setReachable(up)
         if (up) await loadModels()
-        setStatus(up
-          ? "Ollama läuft – KI-Filterung eingeschaltet."
-          : "Ollama konnte nicht automatisch gestartet werden. Bitte manuell starten (ollama serve) – die KI-Filterung bleibt eingeschaltet und das Icon zeigt den Status.")
+        if (!up) showToast("Ollama konnte nicht automatisch gestartet werden. Bitte manuell starten (ollama serve).", "error")
       }
       await agentRequest("POST", "/v1/accounts", { account: { ...account, aiEnabled: enabled } })
       await refresh()
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Umschalten fehlgeschlagen")
+      // invoke() rejected mit einem reinen String (Rust-Fehlertext) – immer
+      // den echten Grund zeigen, nie eine generische Floskel.
+      showToast(`KI-Umschalten fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`, "error")
     } finally {
       setToggling(false)
     }
@@ -1794,9 +1818,6 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/[0.04] text-[#999]"><Bot className="size-4" /></div>
       <div className="min-w-0 flex-1">
         <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-          <span className="truncate">{account.name}</span>
-          <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} />
-          <span className="shrink-0 text-[#555]">·</span>
           <span className="truncate">{account.ollamaModel || selected || "Kein Modell gewählt"}</span>
           <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} />
           <InfoTooltip><p>Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p></InfoTooltip>
@@ -1808,9 +1829,6 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         <CompactOnOff enabled={account.aiEnabled} onChange={(enabled) => void toggleAI(enabled)} label="KI-Filterung" />
       </div>
     </div>
-
-    {ollamaError && <p className="mt-3 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{ollamaError}</p>}
-    {status && <p className="mt-3 text-xs leading-5 text-[#888]">{status}</p>}
 
     {/* Modell-Einstellungen: Wahl, Installation und Fähigkeitstest im Dialog,
         wie bei den Postfach-Einstellungen – die Karte bleibt aufgeräumt. */}
@@ -1852,89 +1870,6 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   </div>
 }
 
-function AutomationPanel({ account, refresh }: { account: Account; refresh: () => void }) {
-  const [report, setReport] = useState<CalibrationReport | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState("")
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [resetOpen, setResetOpen] = useState(false)
-  const [resetBusy, setResetBusy] = useState(false)
-
-  const loadCalibration = async () => {
-    try {
-      setReport(await calibration(account.id))
-    } catch {
-      // Agent offline; keep the last known state.
-    }
-  }
-  useEffect(() => {
-    if (!isTauri()) return
-    void loadCalibration()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account.id])
-
-  const setAutomation = async (enabled: boolean) => {
-    setBusy(true)
-    setMessage("")
-    try {
-      await agentRequest("POST", "/v1/accounts", { account: { ...account, dryRun: !enabled } })
-      await refresh()
-      await loadCalibration()
-      setMessage(enabled
-        ? "Automatik aktiv: bestätigte Verdachtsfälle wandern in den Spamordner. Gelöscht wird nie."
-        : "Automatik deaktiviert: reiner Trockenlauf, es wird nichts verschoben.")
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error)
-      setMessage(text.includes("automation_not_calibrated")
-        ? "Automatik gesperrt: mindestens 20 bestätigte Entscheidungen mit ≥ 99,5 % Präzision bei Score ≥ 98 % erforderlich."
-        : text)
-    } finally {
-      setBusy(false)
-      setConfirmOpen(false)
-    }
-  }
-
-  const doResetLearning = async () => {
-    setResetBusy(true)
-    setMessage("")
-    try {
-      const result = await resetLearning(account.id)
-      await loadCalibration()
-      setMessage(result.cleared > 0
-        ? `Lokales Lernen zurückgesetzt: ${result.cleared} bestätigte Beispiele entfernt. Entscheidungen und E-Mails bleiben erhalten.`
-        : "Kein gespeichertes Lernen zum Zurücksetzen vorhanden.")
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setResetBusy(false)
-      setResetOpen(false)
-    }
-  }
-
-  const precision = report?.thresholds.find((item) => item.threshold >= 0.979 && item.threshold <= 0.981)
-  const precisionText = precision && precision.tp + precision.fp > 0 ? `${Math.round(precision.precision * 1000) / 10} %` : "–"
-  return <div className="mt-4 border-t border-white/[0.07] pt-3">
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">Automatische Verschiebung</p>
-        <p className="mt-1 text-xs leading-5 text-[#666]">{report && report.reviewed > 0
-          ? `Kalibrierung: ${report.reviewed} geprüft · ${report.confirmed} Spam · ${report.rejected} Fehlalarme · Präzision ${precisionText} bei ≥ 98 %`
-          : "Noch keine bestätigten Entscheidungen – der Filter läuft im Trockenlauf."}</p>
-      </div>
-      <CompactOnOff enabled={!account.dryRun} label="Automatische Verschiebung" onChange={(enabled) => { if (enabled) setConfirmOpen(true); else void setAutomation(false) }} />
-    </div>
-    {report?.autoMoveReady && <p className="mt-2 text-xs text-[#aaa]">Automatik freigeschaltet: Präzisionsziel von 99,5 % erreicht.</p>}
-    {busy && <p className="mt-2 text-xs text-[#888]">Wird gespeichert …</p>}
-    {message && <p className="mt-2 text-xs leading-5 text-[#888]">{message}</p>}
-    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
-      <p className="text-xs leading-5 text-[#666]">Lokales Lernen aus bestätigten Reviews für dieses Postfach zurücksetzen. Entscheidungen und E-Mails bleiben unverändert.</p>
-      <Button size="sm" variant="outline" onClick={() => setResetOpen(true)}>Lernen zurücksetzen</Button>
-    </div>
-    <Dialog open={resetOpen} onOpenChange={setResetOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><DialogTitle>Lokales Lernen zurücksetzen?</DialogTitle><DialogDescription>Entfernt alle aus bestätigten Reviews gelernten Merkmale dieses Postfachs.</DialogDescription></DialogHeader><div className="space-y-2 py-2 text-xs leading-5 text-[#999]"><p>• E-Mails und Entscheidungen werden nicht gelöscht.</p><p>• Eine importierte Offline-Baseline bleibt erhalten.</p><p>• Der Filter startet unvoreingenommen und lernt durch neue Bestätigungen erneut.</p></div><DialogFooter><Button variant="ghost" onClick={() => setResetOpen(false)}>Abbrechen</Button><Button disabled={resetBusy} onClick={() => void doResetLearning()}>Zurücksetzen</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><DialogTitle>Automatik aktivieren?</DialogTitle><DialogDescription>Bestätigte Verdachtsfälle mit hoher Sicherheit werden in den Ordner {account.spamFolder || "AI_SPAM_FILTER"} verschoben.</DialogDescription></DialogHeader><div className="space-y-2 py-2 text-xs leading-5 text-[#999]"><p>• E-Mails werden niemals gelöscht – es gibt keine Löschfunktion.</p><p>• Fehlalarme lassen sich mit einem Klick in den Ursprungsordner zurückverschieben.</p><p>• Die Automatik kann jederzeit hier wieder ausgeschaltet werden.</p>{!report?.autoMoveReady && <p className="text-[#e0a86c]">Hinweis: Das Präzisionsziel (99,5 % bei ≥ 98 %) ist noch nicht erreicht. Der Agent lehnt die Aktivierung ab, bis genug bestätigte Entscheidungen vorliegen.</p>}</div><DialogFooter><Button variant="ghost" onClick={() => setConfirmOpen(false)}>Abbrechen</Button><Button disabled={busy} onClick={() => void setAutomation(true)}>Aktivieren</Button></DialogFooter></DialogContent></Dialog>
-  </div>
-}
-
 function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hideTrigger }: { refresh: () => void; onCreated?: (id: string) => void; open?: boolean; onOpenChange?: (open: boolean) => void; hideTrigger?: boolean }) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
@@ -1951,7 +1886,7 @@ function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hi
   return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
     {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
     {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}
-    {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field><Field label="Was erwartest du hier NIEMALS? (optional)"><p className="-mt-1 text-xs text-[#666]">Die KI leitet daraus ab, welche Werbekampagnen für dieses Postfach grundsätzlich fremd sind – je konkreter, desto besser.</p><Textarea className="min-h-20 px-3.5 py-3" placeholder={'Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Kaltakquise von Agenturen'} value={form.unexpected} onChange={(e) => setForm({...form,unexpected:e.target.value})} /></Field></div>}
+    {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field><div className="space-y-2"><div className="flex items-center gap-2"><Label>Was erwartest du hier niemals? (optional)</Label><InfoTooltip><p>Die KI leitet daraus ab, welche Werbekampagnen für dieses Postfach grundsätzlich fremd sind – je konkreter, desto besser.</p></InfoTooltip></div><Textarea className="min-h-20 px-3.5 py-3" placeholder={'Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Kaltakquise von Agenturen'} value={form.unexpected} onChange={(e) => setForm({...form,unexpected:e.target.value})} /></div></div>}
     {step === 3 && <div className="space-y-4"><div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><p className="text-sm font-medium">{form.name || "Postfach"}</p><p className="mt-1 text-xs text-[#666]">{form.username} · {form.host}:{form.port}</p></div><div className="grid grid-cols-2 gap-3 text-xs"><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Profil</p><p className="mt-2 leading-5">{form.industry || "Keine Branche"}<br />{form.languages || "Keine Sprache"}</p></div><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Whitelist</p><p className="mt-2 leading-5">{trustedSenders.length} bestätigte Absender</p></div></div><p className="text-xs leading-5 text-[#666]">Nach dem Verbinden wird ausschließlich lesend geprüft. Automatische Verschiebungen bleiben deaktiviert, bis der Trockenlauf bestätigt wurde.</p>{error && <p role="alert" className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{error}</p>}</div>}
   </div><DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => step === 0 ? setOpen(false) : setStep((current) => current - 1)}>{step === 0 ? "Abbrechen" : "Zurück"}</Button>{step < steps.length - 1 ? <Button disabled={step === 0 && (!form.host || !form.username || !form.password)} onClick={() => setStep((current) => current + 1)}>Weiter</Button> : <Button disabled={saving} onClick={() => void save()}>{saving ? "Verbindet …" : "Sicher verbinden"}</Button>}</DialogFooter></DialogContent></Dialog>
 }
