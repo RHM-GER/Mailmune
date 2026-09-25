@@ -48,6 +48,7 @@ func newModelService(t *testing.T, ollamaURL string) (*Service, *store.SQLite) {
 		t.Fatal(err)
 	}
 	svc.ollama = ollama
+	svc.scanner.ollama = ollama
 	return svc, db
 }
 

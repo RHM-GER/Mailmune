@@ -289,8 +289,8 @@ export function compileProfile(accountId: string): Promise<ProfileModel> {
   return agentRequest<ProfileModel>("POST", `/v1/accounts/${accountId}/profile/compile`)
 }
 
-export function getProfileModel(accountId: string): Promise<{ model: ProfileModel | null; stale: boolean }> {
-  return agentRequest<{ model: ProfileModel | null; stale: boolean }>("GET", `/v1/accounts/${accountId}/profile/model`)
+export function getProfileModel(accountId: string): Promise<{ model: ProfileModel | null; stale: boolean; inUse: boolean }> {
+  return agentRequest<{ model: ProfileModel | null; stale: boolean; inUse: boolean }>("GET", `/v1/accounts/${accountId}/profile/model`)
 }
 
 export function setProfileModelEnabled(accountId: string, enabled: boolean): Promise<{ ok: boolean }> {

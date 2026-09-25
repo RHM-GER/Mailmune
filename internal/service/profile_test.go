@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
+	"github.com/RHM-GER/Mailmune/internal/mailbox/imaptest"
+	"github.com/RHM-GER/Mailmune/internal/provider"
 )
 
 // compileJSON ist eine minimale, gültige Kompilat-Antwort des Fake-Ollama.
@@ -94,6 +97,59 @@ func TestCompileAccountProfileRequiresValidatedModel(t *testing.T) {
 	if _, err := svc.CompileAccountProfile(ctx, "prof-2"); err == nil {
 		t.Fatal("compilation of an empty profile must fail")
 	}
+}
+
+// TestStaleProfileModelAutoRecompilesAfterScan: Ein veraltetes Kompilat bleibt
+// nicht still ungenutzt – nach dem nächsten abgeschlossenen Scan kompiliert der
+// Scanner es im Hintergrund neu (Hash passt danach zum Profiltext).
+func TestStaleProfileModelAutoRecompilesAfterScan(t *testing.T) {
+	fake := fakeOllamaServer(t, compileJSON)
+	server := imaptest.New(t, rev2Caps())
+	svc, db := newTestService(t, server)
+	ollama, err := provider.NewOllama(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.ollama = ollama
+	svc.scanner.ollama = ollama
+	account := createTestAccount(t, svc, server, "prof-auto")
+	ctx := context.Background()
+
+	account.OllamaModel = "qwen3:4b-instruct-2507"
+	account.OllamaValidated = true
+	account.AIEnabled = true
+	account.Profile = domain.MailboxProfile{Purpose: "Design-Agentur", Context: "keine Produktwerbung"}
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CompileAccountProfile(ctx, "prof-auto"); err != nil {
+		t.Fatal(err)
+	}
+
+	account.Profile.Context = "keine Produktwerbung, keine Kaltakquise"
+	if err := db.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, stale, _ := svc.AccountProfileModel(ctx, "prof-auto"); !stale {
+		t.Fatal("compilation must be stale after profile edit")
+	}
+
+	if _, err := svc.StartScan(ctx, account.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if run := waitForScan(t, svc, account.ID); run.Status != domain.ScanCompleted {
+		t.Fatalf("run: %s (%s)", run.Status, run.Error)
+	}
+
+	want := ProfileSourceHash(account.Profile)
+	for attempt := 0; attempt < 50; attempt++ {
+		model, found, stale, err := svc.AccountProfileModel(ctx, "prof-auto")
+		if err == nil && found && !stale && model.SourceHash == want {
+			return // automatisch rekompiliert
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("stale compilation was not auto-recompiled after the scan")
 }
 
 func TestProfileSourceHashStableAndSensitive(t *testing.T) {

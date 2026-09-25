@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/RHM-GER/Mailmune/internal/domain"
 )
@@ -57,30 +55,12 @@ func (s *Service) CompileAccountProfile(ctx context.Context, accountID string) (
 	if err != nil {
 		return domain.ProfileModel{}, err
 	}
-	if !account.OllamaValidated || account.OllamaModel == "" {
-		return domain.ProfileModel{}, errors.New("für die Profil-Kompilierung ist ein validiertes lokales KI-Modell erforderlich")
-	}
-	if strings.TrimSpace(account.Profile.Purpose) == "" && strings.TrimSpace(account.Profile.Context) == "" && strings.TrimSpace(account.Profile.Industry) == "" && strings.TrimSpace(account.Profile.Unexpected) == "" {
-		return domain.ProfileModel{}, errors.New("das Profil ist zu leer für die Kompilierung – bitte Zweck oder Beschreibung des Postfachs angeben")
-	}
-	compiled, err := s.ollama.CompileProfile(ctx, account.OllamaModel, account.Profile)
+	model, err := s.scanner.recompileProfile(ctx, account)
 	if err != nil {
 		return domain.ProfileModel{}, err
 	}
-	model := domain.ProfileModel{
-		AccountID:  accountID,
-		SourceHash: ProfileSourceHash(account.Profile),
-		CompiledAt: time.Now().UTC(),
-		Model:      account.OllamaModel,
-		Prompt:     compiled.Prompt,
-		Indicators: compiled.Indicators,
-		Enabled:    true,
-	}
-	if err := s.store.SaveProfileModel(ctx, model); err != nil {
-		return domain.ProfileModel{}, err
-	}
 	if s.hub != nil {
-		s.hub.Publish("profile.compiled", map[string]string{"accountId": accountID, "model": model.Model})
+		s.hub.Publish("profile.compiled", map[string]string{"accountId": accountID, "model": model.Model, "reason": "manual"})
 	}
 	return model, nil
 }

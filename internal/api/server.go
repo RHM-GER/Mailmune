@@ -144,7 +144,8 @@ func (s *Server) profileModel(w http.ResponseWriter, r *http.Request) {
 	if found {
 		payload = model
 	}
-	respond(w, "profile_model_failed", map[string]any{"model": payload, "stale": stale}, nil)
+	inUse := found && model.Enabled && !stale
+	respond(w, "profile_model_failed", map[string]any{"model": payload, "stale": stale, "inUse": inUse}, nil)
 }
 
 func (s *Server) setProfileModelEnabled(w http.ResponseWriter, r *http.Request) {

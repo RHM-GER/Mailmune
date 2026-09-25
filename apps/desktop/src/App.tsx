@@ -324,6 +324,14 @@ export default function App() {
         // Die ID pro Konto ersetzt frühere Warnungen statt sie zu stapeln.
         const data = event.data as { accountId?: string; model?: string; error?: string }
         pushNotification({ id: `model-unavailable-${data.accountId ?? "unknown"}`, kind: "model", title: "KI-Filterung ausgefallen – Ollama starten", detail: `Das lokale Modell (${data.model ?? "unbekannt"}) ist nicht erreichbar: ${data.error || "Ollama läuft nicht"}. Bitte Ollama starten, sonst prüft nur der Regelfilter.`, time: Date.now(), action: false })
+      } else if (event.type === "profile.compiled") {
+        // Automatische oder manuelle Rekompilierung des Profilmodells melden,
+        // damit klar ist, ab wann Indikatoren/Prompt frisch sind.
+        const data = event.data as { reason?: string }
+        showToast(data.reason === "auto"
+          ? "KI-Profil automatisch neu kompiliert – dein geänderter Profiltext wirkt jetzt."
+          : "KI-Profil neu kompiliert.")
+        void refresh()
       }
       void refresh()
     }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -302,9 +303,18 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// Neugenerierung an).
 	var profileIndicators *domain.ProfileIndicators
 	var profilePrompt string
-	if compiled, found, loadErr := s.store.GetProfileModel(ctx, account.ID); loadErr == nil && found && compiled.Enabled && compiled.SourceHash == ProfileSourceHash(account.Profile) {
-		profileIndicators = &compiled.Indicators
-		profilePrompt = compiled.Prompt
+	profileStale := false
+	if compiled, found, loadErr := s.store.GetProfileModel(ctx, account.ID); loadErr == nil && found && compiled.Enabled {
+		if compiled.SourceHash == ProfileSourceHash(account.Profile) {
+			profileIndicators = &compiled.Indicators
+			profilePrompt = compiled.Prompt
+			log.Printf("scan %s: KI-Profilmodell aktiv, Indikatoren + Prompt im Einsatz", account.ID)
+		} else {
+			profileStale = true
+			log.Printf("scan %s: KI-Profilmodell VERALTET (Profiltext geändert) – Indikatoren/Prompt pausiert, Rekompilierung nach dem Lauf", account.ID)
+		}
+	} else {
+		log.Printf("scan %s: kein aktives KI-Profilmodell – nur eingebauten Regeln/Vertikalen", account.ID)
 	}
 	// learned is the bounded per-profile context for the optional local model
 	// ("RAG light"): the same confirmed knowledge that drives scoring, built
@@ -448,6 +458,19 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		if modelErr != nil && s.hub != nil {
 			s.hub.Publish("model.unavailable", map[string]string{"accountId": account.ID, "model": account.OllamaModel, "error": redactError(modelErr)})
 		}
+		// Veraltetes Kompilat? Nach dem Lauf automatisch neu kompilieren, damit
+		// Profiländerungen nie still ungenutzt bleiben.
+		if profileStale {
+			go func() {
+				if _, err := s.recompileProfile(context.Background(), account); err != nil {
+					log.Printf("profile recompile %s: %v", account.ID, err)
+					return
+				}
+				if s.hub != nil {
+					s.hub.Publish("profile.compiled", map[string]string{"accountId": account.ID, "reason": "auto"})
+				}
+			}()
+		}
 		// Spam, das ein Mensch oder ein Fremdfilter einsortiert hat, wird als
 		// "Nicht erkannt"-Serie erfasst (read-only Sweep des Spam-Ordners).
 		s.sweepSpamFolder(ctx, account, password, run)
@@ -507,6 +530,35 @@ func (s *Scanner) sweepSpamFolder(ctx context.Context, account domain.AccountCon
 		}})
 	}
 	return missed
+}
+
+// recompileProfile erzeugt das KI-Profilmodell neu (Prompt + Indikatoren) –
+// die einzige Implementierung; der Service-Endpoint und die automatische
+// Rekompilierung nach veraltetem Kompilat nutzen beide diesen Weg.
+func (s *Scanner) recompileProfile(ctx context.Context, account domain.AccountConfig) (domain.ProfileModel, error) {
+	if !account.OllamaValidated || account.OllamaModel == "" {
+		return domain.ProfileModel{}, errors.New("für die Profil-Kompilierung ist ein validiertes lokales KI-Modell erforderlich")
+	}
+	if strings.TrimSpace(account.Profile.Purpose) == "" && strings.TrimSpace(account.Profile.Context) == "" && strings.TrimSpace(account.Profile.Industry) == "" && strings.TrimSpace(account.Profile.Unexpected) == "" {
+		return domain.ProfileModel{}, errors.New("das Profil ist zu leer für die Kompilierung")
+	}
+	compiled, err := s.ollama.CompileProfile(ctx, account.OllamaModel, account.Profile)
+	if err != nil {
+		return domain.ProfileModel{}, err
+	}
+	model := domain.ProfileModel{
+		AccountID:  account.ID,
+		SourceHash: ProfileSourceHash(account.Profile),
+		CompiledAt: time.Now().UTC(),
+		Model:      account.OllamaModel,
+		Prompt:     compiled.Prompt,
+		Indicators: compiled.Indicators,
+		Enabled:    true,
+	}
+	if err := s.store.SaveProfileModel(ctx, model); err != nil {
+		return domain.ProfileModel{}, err
+	}
+	return model, nil
 }
 
 // consultModel runs the optional local Ollama classification and merges a

@@ -335,10 +335,11 @@
     "ProfileModelResponse": {
       "description": "Antwort von GET /v1/accounts/{id}/profile/model: model ist null, wenn noch nie kompiliert wurde; stale=true means Profiltext und Kompilat passen nicht mehr zusammen.",
       "type": "object",
-      "required": ["model", "stale"],
+      "required": ["model", "stale", "inUse"],
       "properties": {
         "model": { "oneOf": [{ "$ref": "#/$defs/ProfileModel" }, { "type": "null" }] },
-        "stale": { "type": "boolean" }
+        "stale": { "type": "boolean" },
+        "inUse": { "type": "boolean", "description": "true = Kompilat existiert, ist eingeschaltet und passt zum aktuellen Profiltext (Indikatoren + Prompt sind im Scan aktiv)." }
       },
       "additionalProperties": false
     },
