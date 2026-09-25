@@ -723,16 +723,17 @@ function DualRangeSlider({ min, max, onChange }: { min: number; max: number; onC
     window.addEventListener("pointerup", stop)
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop) }
   }, [dragging, min, max, onChange])
-  // Thumbs 1:1 wie der Einstellungs-Slider: kleiner heller Balken an der
-  // Füllkante (dort nur rechts, da Single-Value), hier links und rechts.
-  // Unsichtbare breitere Trefferfläche via before-Pseudo für brauchbares Ziehen.
-  const thumb = "absolute top-1/2 z-10 h-5 w-1 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#242424] before:absolute before:-inset-x-2.5 before:-inset-y-2"
+  // Exakt derselbe Aufbau wie der Einstellungs-Slider (Automatische
+  // Spam-Schwelle): dunkler Füll-„Schuh“ zwischen min und max, Griff-Balken
+  // mit Abstand INNERHALB der Füllkanten (left-3/right-3, wie dort right-3),
+  // unsichtbare breitere Trefferfläche via before-Pseudo.
+  const thumb = "absolute top-1/2 z-10 h-5 w-1 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#242424] before:absolute before:-inset-x-2.5 before:-inset-y-2"
   return (
-    <div ref={trackRef} className="relative h-12 w-full select-none rounded-[10px] border border-white/10 bg-[#242424] p-1">
+    <div ref={trackRef} className="relative h-12 overflow-hidden rounded-[10px] border border-white/10 bg-[#242424] p-1">
       <div className="pointer-events-none absolute inset-y-3 left-4 right-4 opacity-70" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,.055) 0 4px, transparent 4px 14px)" }} />
       <div className="pointer-events-none absolute inset-y-1 rounded-lg bg-[#171717]" style={{ left: `${min}%`, width: `${Math.max(max - min, 0)}%` }} />
-      <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `${min}%` }} />
-      <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `${max}%` }} />
+      <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `calc(${min}% + 12px)` }} />
+      <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `calc(${max}% - 16px)` }} />
     </div>
   )
 }
@@ -751,7 +752,7 @@ function ScoreRangeDialog({ open, onOpenChange, initial, onApply }: { open: bool
         <DualRangeSlider min={draft.min} max={draft.max} onChange={(min, max) => setDraft({ min, max })} />
         <div className="mt-2 flex justify-between font-mono text-xs text-[#888] tabular-nums"><span>{draft.min} %</span><span>{draft.max} %</span></div>
       </div>
-      <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button onClick={() => onApply(draft)}>Anwenden</Button></DialogFooter>
+      <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" className="mr-auto" onClick={() => setDraft({ min: 0, max: 100 })}>Zurücksetzen</Button><Button variant="ghost" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button onClick={() => onApply(draft)}>Anwenden</Button></DialogFooter>
     </DialogContent>
   </Dialog>
 }
@@ -786,7 +787,8 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [referenceTime] = useState(() => Date.now())
-  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "receivedAt", direction: "desc" })
+  // Sortierung je Ansicht persistent (übersteht Seitenwechsel).
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>(() => readStoredSort(view))
   const scoreFilterActive = scoreRange.min > 0 || scoreRange.max < 100
   const filtersActive = range !== "all" || scoreFilterActive || (view === "review" && reviewFilter !== "review")
   useEffect(() => { localStorage.setItem("mailmune.reviewView", view) }, [view])
@@ -794,6 +796,8 @@ function ReviewPage({ decisions, refresh, agentOnline, onCheckMail }: { decision
   useEffect(() => { localStorage.setItem("mailmune.reviewRange.v2", range) }, [range])
   useEffect(() => { localStorage.setItem("mailmune.reviewCustomRange", JSON.stringify(customRange)) }, [customRange])
   useEffect(() => { localStorage.setItem("mailmune.reviewScoreRange", JSON.stringify(scoreRange)) }, [scoreRange])
+  useEffect(() => { setSort(readStoredSort(view)) }, [view])
+  useEffect(() => { localStorage.setItem(`mailmune.sort.${view}`, JSON.stringify(sort)) }, [sort, view])
   const resetFilters = () => { setRange("all"); setReviewFilter("review"); setScoreRange({ min: 0, max: 100 }); setCustomRange(null); setSelected([]) }
   const filtered = useMemo(() => {
     const days = range === "week" ? 7 : range === "month" ? 31 : range === "year" ? 366 : Infinity
@@ -990,7 +994,7 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
     ...(middle ? [{ value: "middle" as const, label: middle.label, icon: ShieldCheck }] : []),
     { value: "cancel" as const, label: "Abbrechen", icon: X },
   ]
-  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} absolute bottom-8 left-1/2 z-30`}>
+  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} fixed bottom-8 left-1/2 z-40 -translate-x-1/2`}>
     <SegmentedControl
       className="shadow-[0_30px_60px_rgba(0,0,0,.45)]"
       buttonClassName="px-4 text-sm"
@@ -1066,9 +1070,30 @@ function FilterToolbarButton({ active, open, count, onToggle, onReset }: { activ
 }
 
 function SortableHead({ label, name, sort, setSort, icon: HeadIcon, last = false }: { label: string; name: SortKey; sort: { key: SortKey; direction: SortDirection }; setSort: (value: { key: SortKey; direction: SortDirection }) => void; icon: typeof Mail; last?: boolean }) {
-  const Icon = sort.key !== name || !sort.direction ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown
-  const update = (direction: SortDirection) => setSort({ key: name, direction })
-  return <div role="columnheader" className={`flex h-full items-center px-4 ${last ? "" : shortDivider}`}><DropdownMenu><DropdownMenuTrigger render={<button className="flex w-full items-center justify-between gap-2 text-xs text-[#a8a8a8] hover:text-white" />}><span className="flex min-w-0 items-center gap-2"><HeadIcon className="size-3.5 shrink-0" /><span className="truncate">{label}</span></span><Icon className="size-3.5 shrink-0" /></DropdownMenuTrigger><DropdownMenuContent align="start"><DropdownMenuItem onClick={() => update("asc")}><ArrowUp />Aufsteigend</DropdownMenuItem><DropdownMenuItem onClick={() => update("desc")}><ArrowDown />Absteigend</DropdownMenuItem><DropdownMenuItem onClick={() => update(null)}><RefreshCw />Zurücksetzen</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+  const active = sort.key === name && sort.direction !== null
+  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown
+  // Klick-Zyklus direkt auf dem Spaltenkopf: unsortiert → aufsteigend →
+  // absteigend → zurücksetzen. Das Dropdown ist damit überflüssig.
+  const cycle = () => {
+    if (!active) setSort({ key: name, direction: "asc" })
+    else if (sort.direction === "asc") setSort({ key: name, direction: "desc" })
+    else setSort({ key: name, direction: null })
+  }
+  return <div role="columnheader" aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`flex h-full items-center px-4 ${last ? "" : shortDivider}`}><button type="button" onClick={cycle} aria-label={`${label} sortieren`} className={`flex w-full items-center justify-between gap-2 text-xs outline-none transition-colors focus-visible:text-white ${active ? "text-white" : "text-[#a8a8a8] hover:text-white"}`}><span className="flex min-w-0 items-center gap-2"><HeadIcon className="size-3.5 shrink-0" /><span className="truncate">{label}</span></span><Icon className="size-3.5 shrink-0" /></button></div>
+}
+
+// Sortierung pro Ansicht persistiert lesen (Seitenwechsel überlebt).
+function readStoredSort(view: string): { key: SortKey; direction: SortDirection } {
+  try {
+    const raw = localStorage.getItem(`mailmune.sort.${view}`)
+    if (raw) {
+      const parsed = JSON.parse(raw) as { key: SortKey; direction: SortDirection }
+      if (parsed && typeof parsed.key === "string") return { key: parsed.key, direction: parsed.direction ?? null }
+    }
+  } catch {
+    // kaputter Eintrag: Standard benutzen
+  }
+  return { key: "receivedAt", direction: "desc" }
 }
 
 function StatusBadge({ status }: { status: Decision["status"] }) { const labels = { pending: "Review", moved: "Review", confirmed: "Bestätigt", rejected: "Fehlalarm", deferred: "Später" }; return <Badge variant="outline" className="border-white/10 bg-white/[0.025] text-[#aaa]">{labels[status]}</Badge> }
@@ -1117,13 +1142,9 @@ function Notifications({ scrollRef, items = notifications, archive, onArchiveCha
     </div> })}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
     {view === "archived" && <p className="mt-3 text-right text-[11px] text-[#555]">Archivierte Einträge werden nach 180 Tagen entfernt.</p>}
     </div>
-    {/* Massenaktions-Leiste: klebt am unteren Rand des sichtbaren Bereichs.
-        Wichtig: `sticky` erzeugt einen eigenen Stacking-Context – ohne z-40
-        würde das innere z-30 der Leiste eingefangen und der Scroll-Button
-        (z-20) läge darüber. */}
-    <div className="sticky bottom-0 z-40 h-0">
-      <FloatingActions visible={selected.length > 0} primary={view === "open" ? `Archivieren (${selected.length})` : `Wiederherstellen (${selected.length})`} onPrimary={bulkAction} onCancel={() => setSelected([])} />
-    </div>
+    {/* Massenaktions-Leiste: wie überall in der App global fixiert unten
+        (FloatingActions ist fixed) – kein Seiten-spezifischer Wrapper. */}
+    <FloatingActions visible={selected.length > 0} primary={view === "open" ? `Archivieren (${selected.length})` : `Wiederherstellen (${selected.length})`} onPrimary={bulkAction} onCancel={() => setSelected([])} />
     <SectionIndicator items={notificationSections} scrollRef={scrollRef} />
   </div>
 }

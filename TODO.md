@@ -259,3 +259,9 @@ Ziel: zuerst ein sicherer, vollständig lokaler Trockenlauf mit einem echten IMA
 - [x] „Automatische Verschiebung“ komplett aus Postfach-Karte und Einstellungsdialog entfernt (AutomationPanel gelöscht): Der Spamverhalten-Slider regelt die Automatik pro Profil – „Manuell“ = Trockenlauf, „Standard“/„Autonom“ = automatische Verschiebung (Kalibrierungs-Gate bleibt serverseitig, Fehler kommt als Toast und der Slider springt zurück)
 - [x] Postfach-Dialog: alle Tabs gleiche feste Höhe (kein Höhensprung/Verutschen beim Umschalten), DialogDescription entfernt, Passwort-Anleitung als Tooltip, Zugangsdaten-Warnung gekürzt, „niemals“ klein, Hinweistext als Tooltip, mehr Abstand (space-y-6) im KI-Profil-Tab
 - [x] „400 unknown field“-Fehlerklasse radikal beseitigt: Der API-Decoder ignoriert unbekannte Felder jetzt (kein DisallowUnknownFields mehr) – Frontend/Agent-Versionsdrift (alter Sidecar-Prozess) kann nie wieder Speichern/Umschalten blockieren. Zusätzlich: „Lokal installiert“-Liste aus dem KI-Modell-Dialog entfernt (stand doppelt im Dropdown)
+
+## UI-Feedback Runde 4 (2026-09-25)
+
+- [x] FloatingActions-Leiste (Spam markieren/Archivieren/Löschen/Speichern) APP-WEIT global fixiert unten mittig (fixed statt absolute/sticky-Wrapper) – überall dieselbe Position, auch bei Benachrichtigungen
+- [x] Tabellensortierung: Klick-Zyklus direkt auf dem Spaltenkopf (unsortiert → aufsteigend → absteigend → zurücksetzen), Dropdown entfernt, Icons wie zuvor (beide Pfeile = unsortiert), Sortierung je Ansicht persistent über Seitenwechsel
+- [x] Score-Dialog: Dual-Slider EXAKT im Settings-Look (Füll-Schuh, Griff-Balken mit Abstand innerhalb der Kanten statt außen) + „Zurücksetzen“-Button im Dialog
