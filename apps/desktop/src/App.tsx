@@ -1592,7 +1592,7 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
       setResetOpen(false)
     }
   }
-  return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[88vh] overflow-hidden border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
+  return <><Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[88vh] flex-col overflow-hidden border-white/[0.08] bg-[#1d1d1d] sm:max-w-[640px]">
     <DialogHeader><DialogTitle>Postfach-Einstellungen</DialogTitle></DialogHeader>
     {/* Bereichs-Tabs: nur so breit wie ihr Inhalt; werden es mehr als in die
         Karte passen, wird der Wrapper zum Scroll-Container. */}
@@ -1600,8 +1600,10 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
       <SegmentedControl className="w-fit" ariaLabel="Einstellungsbereiche" options={[{ value: "connection", label: "Verbindung" }, { value: "profile", label: "KI-Profil" }, { value: "behavior", label: "Verhalten" }]} value={tab} onChange={(next) => { if (next) setTab(next) }} />
     </div>
     {/* Feste Inhaltshöhe: Beim Umschalten der Bereiche darf der zentrierte
-        Dialog nicht in der Höhe springen und anders landen. */}
-    <div className="h-[540px] overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+        Dialog nicht in der Höhe springen und anders landen. Auf niedrigen
+        Fenstern schrumpft der Bereich (min-h-0 + shrink), damit Header,
+        Tabs UND der Footer mit Abbrechen/Speichern immer sichtbar bleiben. */}
+    <div className="h-[540px] min-h-0 shrink overflow-y-auto pr-1 [scrollbar-gutter:stable]">
     {tab === "connection" && <div className="space-y-5 py-2">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Anzeigename"><Input className="h-12 px-3.5" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
