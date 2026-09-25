@@ -30,6 +30,7 @@ const (
 	CodeServerMarkedSpam     = "server_marked_spam"
 	CodeBlackmail            = "blackmail_threat"
 	CodeSpoofedSender        = "spoofed_sender"
+	CodeOwnDomainAligned     = "own_domain_aligned"
 	CodeSenderMismatch       = "sender_mismatch"
 	CodeBrandImpersonation   = "brand_impersonation"
 	CodeBrandAligned         = "brand_aligned_domain"
@@ -163,11 +164,42 @@ func (r *Rules) ClassifyFull(msg domain.MessageFeatures, profile domain.MailboxP
 
 // stageTrust collects explicit allow-list and relationship signals. They
 // never trigger moves themselves but cap the score via StrongTrustSignal.
+// ownDomainAlignedInternal meldet, ob ein Eigene-Domain-Absender zusätzlich
+// eine passende Envelope (Return-Path auf eigener Domain/Subdomain oder gar
+// keine) und keine fehlgeschlagene Authentifizierung mitbringt – das Muster
+// eigener Web-/Systemmails (WordPress, Shop, Telefonanlage). Echte Fälscher
+// besitzen keine Kontrolle über den Zielserver und liefern dieses Muster
+// praktisch nie; Sextortion-Mails haben fremde Return-Paths.
+func ownDomainAlignedInternal(msg domain.MessageFeatures) bool {
+	own := strings.ToLower(strings.TrimSpace(msg.OwnDomain))
+	if own == "" {
+		return false
+	}
+	fromDomain := strings.ToLower(strings.TrimSpace(msg.FromDomain))
+	if fromDomain != own && !strings.HasSuffix(fromDomain, "."+own) {
+		return false
+	}
+	if msg.AuthenticationFailed {
+		return false
+	}
+	returnPath := strings.ToLower(strings.TrimSpace(ExtractDomain(msg.ReturnPath)))
+	// Eine FEHLENDE Envelope zählt bewusst nicht als internes Muster: genau
+	// das liefern gefälschte Sextortion-Mails häufig.
+	return returnPath == own || strings.HasSuffix(returnPath, "."+own) || strings.HasSuffix(own, "."+returnPath)
+}
+
 func (r *Rules) stageTrust(msg domain.MessageFeatures, profile domain.MailboxProfile, evidence *[]domain.Evidence) bool {
 	strongTrust := false
 	if msg.KnownCorrespondent {
 		strongTrust = true
 		*evidence = append(*evidence, domain.Evidence{Group: "relationship", Code: CodeKnownCorrespondent, Weight: -0.9, Summary: "Bekannter Korrespondenzpartner aus dem eigenen Postausgang"})
+	}
+	// Eigene Infrastruktur: WordPress-Formularbenachrichtigungen, Shop- oder
+	// Anlagen-Mails kommen von der eigenen Domain. Mit passender Envelope und
+	// ohne Auth-Fehlschlag sind sie Systempost, kein Spoofing.
+	if ownDomainAlignedInternal(msg) {
+		strongTrust = true
+		*evidence = append(*evidence, domain.Evidence{Group: "relationship", Code: CodeOwnDomainAligned, Weight: -0.7, Summary: "Eigene Domain mit passender Envelope – interne System-/Website-Mail"})
 	}
 	if containsFold(profile.TrustedSenders, msg.From) {
 		strongTrust = true
@@ -225,8 +257,9 @@ func (r *Rules) stageSenderIntegrity(msg domain.MessageFeatures, evidence *[]dom
 	}
 	// An incoming message whose From claims the account owner's own domain is
 	// very likely spoofed (e.g. sextortion forging the victim's address). The
-	// owner rarely mails themselves; a known correspondent is excluded.
-	if own := strings.ToLower(strings.TrimSpace(msg.OwnDomain)); own != "" && senderDomain == own && !msg.KnownCorrespondent {
+	// owner rarely mails themselves; a known correspondent is excluded. Eigene
+	// Systemmails mit passender Envelope sind ausgenommen (own_domain_aligned).
+	if own := strings.ToLower(strings.TrimSpace(msg.OwnDomain)); own != "" && senderDomain == own && !msg.KnownCorrespondent && !ownDomainAlignedInternal(msg) {
 		*evidence = append(*evidence, domain.Evidence{Group: "sender_integrity", Code: CodeSpoofedSender, Weight: 0.45, Summary: "Absender gibt die eigene Domain an – bei eingehender Mail wahrscheinlich gefälscht (Spoofing)"})
 	}
 	// Envelope sender (Return-Path) versus From: the envelope is set by the

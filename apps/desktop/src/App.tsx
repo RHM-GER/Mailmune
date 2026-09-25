@@ -396,7 +396,9 @@ export default function App() {
     // Zustandsvergleich, damit der Effect idempotent bleibt).
     if (summary.pending !== pushedPendingRef.current) {
       pushedPendingRef.current = summary.pending
-      void sendOsNotification(`${summary.pending} Fälle benötigen eine Prüfung`, "Mailmune: neue Verdachtsfälle warten im Review.")
+      // KEIN OS-Push hier: Während des Erstscans steigt die Zahl in kurzen
+      // Abständen und würde Push-Spam erzeugen. Der einmalige Push kommt mit
+      // scan.finished (nur bei Funden); in-app bleibt die Nachverfolgung.
     }
   }, [summary.pending])
 
@@ -1175,12 +1177,42 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [folderName, setFolderName] = useState(accounts[0]?.spamFolder ?? "AI_SPAM_FILTER")
   const [folderDraft, setFolderDraft] = useState(folderName)
   const [editingFolder, setEditingFolder] = useState(false)
-  const [notificationThreshold, setNotificationThreshold] = useState(() => Number(readStoredValue("mailmune.notificationThreshold", "spamalytic.notificationThreshold", "90")))
-  const [automaticThreshold, setAutomaticThreshold] = useState(() => Number(readStoredValue("mailmune.automaticSpamThreshold.v2", "spamalytic.automaticSpamThreshold.v2", "90")))
+  // Schwellen liegen PRO Postfach (Profil), nicht global pro Gerät.
+  const [notificationThreshold, setNotificationThreshold] = useState(90)
+  const [automaticThreshold, setAutomaticThreshold] = useState(90)
   const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
   const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
   const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
   const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
+  // „Bei Posteingang“ = account.enabled serverseitig: pro Profil getrennt und
+  // über Neustarts persistent statt nur lokaler Schalterzustand.
+  useEffect(() => { setIncomingReviewEnabled(activeAccount?.enabled ?? true) }, [activeAccount?.id, activeAccount?.enabled])
+  const toggleIncomingReview = async (enabled: boolean) => {
+    setIncomingReviewEnabled(enabled)
+    const account = activeAccount
+    if (!account) return
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: { ...account, enabled } })
+      await refresh()
+    } catch (cause) {
+      setIncomingReviewEnabled(!enabled)
+      showToast(cause instanceof Error ? cause.message : String(cause), "error")
+    }
+  }
+  // Schwellen pro Profil laden (mit Fallback auf den alten globalen Wert).
+  useEffect(() => {
+    const id = activeAccount?.id ?? "global"
+    setNotificationThreshold(Number(readStoredValue(`mailmune.notificationThreshold.${id}`, `spamalytic.notificationThreshold.${id}`, readStoredValue("mailmune.notificationThreshold", "spamalytic.notificationThreshold", "90"))))
+    setAutomaticThreshold(Number(readStoredValue(`mailmune.automaticSpamThreshold.v3.${id}`, `spamalytic.automaticSpamThreshold.v3.${id}`, readStoredValue("mailmune.automaticSpamThreshold.v2", "spamalytic.automaticSpamThreshold.v2", "90"))))
+  }, [activeAccount?.id])
+  const storeAutomaticThreshold = (value: number) => {
+    setAutomaticThreshold(value)
+    localStorage.setItem(`mailmune.automaticSpamThreshold.v3.${activeAccount?.id ?? "global"}`, String(value))
+  }
+  const storeNotificationThreshold = (value: number) => {
+    setNotificationThreshold(value)
+    localStorage.setItem(`mailmune.notificationThreshold.${activeAccount?.id ?? "global"}`, String(value))
+  }
   const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
   // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
@@ -1295,9 +1327,9 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     <div className="mb-6 mt-14"><h2 className="text-base font-medium">Profilkonfiguration</h2><p className="mt-1 text-xs text-[#666]">Diese Einstellungen gelten nur für das aktuell ausgewählte Postfach.</p></div>
     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,612px)_minmax(0,1fr)] xl:gap-16">
     <section data-section-id="settings-filter" className="min-w-0">
-      <SafetySlider mode={mode} setMode={(nextMode) => { void persistSafetyMode(nextMode); if (nextMode === "safe" && automaticThreshold < 90) { setAutomaticThreshold(90); localStorage.setItem("mailmune.automaticSpamThreshold.v2", "90") } }} />
-      {mode !== "confirm_all" && <div className="mt-6"><AutomaticSpamThreshold value={automaticThreshold} onChange={(value) => { setAutomaticThreshold(value); localStorage.setItem("mailmune.automaticSpamThreshold.v2", String(value)); if (value < 90) setMode("aggressive") }} /></div>}
-      <div className="mt-6"><NotificationStrength value={notificationThreshold} onChange={(value) => { setNotificationThreshold(value); localStorage.setItem("mailmune.notificationThreshold", String(value)) }} /></div>
+      <SafetySlider mode={mode} setMode={(nextMode) => { void persistSafetyMode(nextMode); if (nextMode === "safe" && automaticThreshold < 90) { storeAutomaticThreshold(90) } }} />
+      {mode !== "confirm_all" && <div className="mt-6"><AutomaticSpamThreshold value={automaticThreshold} onChange={(value) => { storeAutomaticThreshold(value); if (value < 90) setMode("aggressive") }} /></div>}
+      <div className="mt-6"><NotificationStrength value={notificationThreshold} onChange={(value) => { storeNotificationThreshold(value) }} /></div>
       <div className="my-6 border-t border-white/[0.09]" />
       <div data-section-id="settings-folder" className="space-y-3">
         <div className="flex items-center gap-2"><h2 className="text-sm font-medium">Ordnername</h2><InfoTooltip><p>Ändert den IMAP-Zielordner und aktualisiert alle zugehörigen Verknüpfungen. Vorhandene Nachrichten werden dabei nicht gelöscht.</p></InfoTooltip></div>
@@ -1310,7 +1342,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
           <div><label className="mb-1.5 block text-xs text-[#888]">Uhrzeit</label><Select value={String(deepScanHour)} onValueChange={(value) => void persistDeepScan({ deepScanHour: Number(value) })}><SelectTrigger className="h-10! w-full rounded-[10px] border-white/10 bg-[#242424] px-3 text-sm"><SelectValue>{String(deepScanHour).padStart(2, "0")}:00</SelectValue></SelectTrigger><SelectContent>{Array.from({ length: 24 }, (_, hour) => <SelectItem key={hour} value={String(hour)}>{String(hour).padStart(2, "0")}:00</SelectItem>)}</SelectContent></Select></div>
           {activeAccount && !activeAccount.ollamaValidated && <p className="col-span-2 text-xs leading-5 text-[#888]">Ohne validiertes KI-Modell prüft die Wochenprüfung nur mit Regeln und Statistik – verpasste Termine holt der Agent automatisch nach.</p>}
         </div>}
-      </ConnectionCard><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={setIncomingReviewEnabled} onSettings={() => {}} /></div></div>
+      </ConnectionCard><ConnectionCard icon={MailCheck} title="Bei Posteingang" detail="Neue Nachrichten direkt prüfen" enabled={incomingReviewEnabled} onEnabled={(enabled) => void toggleIncomingReview(enabled)} onSettings={() => {}} /></div></div>
     </section>
     <section className="min-w-0 space-y-6">
       <div data-section-id="settings-account" className="border-b border-white/[0.09] pb-6"><ConnectionSection title="Postfach" count={accounts.length + (fakeAccountVisible && accounts.length === 0 ? 1 : 0)} add={<div className="flex items-center gap-1.5"><TransferPlaceholder kind="learning" accountId={activeAccountId} /><TransferPlaceholder kind="profile" accountId={activeAccountId} /><AddAccount refresh={refresh} /></div>}>
@@ -1327,7 +1359,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
     <SectionIndicator items={settingsSections} scrollRef={settingsScrollRef} />
     {settingsAccount && <MailboxSettingsDialog account={accounts.find((item) => item.id === settingsAccount.id) ?? settingsAccount} open onOpenChange={(open) => { if (!open) setSettingsAccount(null) }} refresh={refresh} onAction={(action) => { const current = accounts.find((item) => item.id === settingsAccount.id); if (current) void runAccountAction(current, action) }} />}
-    <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { setFolderName(folderDraft.trim()); setEditingFolder(false) }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
+    <FloatingActions visible={editingFolder} primary="Speichern" disabled={!folderDraft.trim()} onPrimary={() => { const next = folderDraft.trim(); setFolderName(next); setEditingFolder(false); const account = activeAccount; if (account && account.spamFolder !== next) { void (async () => { try { await agentRequest("POST", "/v1/accounts", { account: { ...account, spamFolder: next } }); showToast(`Spam-Ordner auf „${next}“ geändert.`); await refresh() } catch (cause) { showToast(cause instanceof Error ? cause.message : String(cause), "error"); await refresh() } })() } }} onCancel={() => { setFolderDraft(folderName); setEditingFolder(false) }} />
     <FloatingActions visible={Boolean(deleteTarget)} primary="Wirklich löschen?" onPrimary={() => { if (!deleteTarget) return; const target = deleteTarget; setDeleteTarget(null); if (target.id === "demo-strato") { setFakeAccountVisible(false); return } if (target.kind === "account") { void (async () => { try { await deleteAccount(target.id) } catch (error) { showToast(`Löschen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`, "error") } await refresh() })() } }} onCancel={() => setDeleteTarget(null)} />
   </div>
 }
@@ -1551,6 +1583,10 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
   // serverseitig auf dem gespeicherten Profil), dann leitet die KI daraus
   // Indikatoren und Prompt neu ab.
   const generate = async () => {
+    if (!account.ollamaValidated || !account.aiEnabled) {
+      showToast("KI nicht eingerichtet oder ausgeschaltet: zuerst Modell wählen, validieren und die KI einschalten.", "error")
+      return
+    }
     setCompiling(true)
     try {
       await agentRequest("POST", "/v1/accounts", { account: draft })
