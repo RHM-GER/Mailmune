@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -33,6 +34,16 @@ func main() {
 	if err := os.MkdirAll(*dataDir, 0700); err != nil {
 		log.Fatal(err)
 	}
+	// Debug-Logdatei neben der Datenbank: alles, was der Agent loggt (Scans,
+	// KI-Consults, Profil-Indikatoren, Fehler), landet zusätzlich hier und
+	// lässt sich jederzeit öffnen – unabhängig davon, ob ein Terminal lauscht.
+	if logFile, openErr := os.OpenFile(filepath.Join(*dataDir, "mailmune-debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); openErr == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+		defer logFile.Close()
+	} else {
+		log.Printf("debug log disabled: %v", openErr)
+	}
+	log.Printf("agent start: data-dir=%s", *dataDir)
 	token := os.Getenv("MAILMUNE_TOKEN")
 	if token == "" {
 		token = randomToken()

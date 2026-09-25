@@ -327,6 +327,11 @@ export default function App() {
         // Die ID pro Konto ersetzt frühere Warnungen statt sie zu stapeln.
         const data = event.data as { accountId?: string; model?: string; error?: string }
         pushNotification({ id: `model-unavailable-${data.accountId ?? "unknown"}`, kind: "model", title: "KI-Filterung ausgefallen – Ollama starten", detail: `Das lokale Modell (${data.model ?? "unbekannt"}) ist nicht erreichbar: ${data.error || "Ollama läuft nicht"}. Bitte Ollama starten, sonst prüft nur der Regelfilter.`, time: Date.now(), action: false })
+      } else if (event.type === "model.error") {
+        // Einzelfehler der KI (Timeout, Kontextlänge, Modell-404 …): echte
+        // Ursache zeigen, NICHT behaupten, Ollama liefe nicht.
+        const data = event.data as { accountId?: string; model?: string; error?: string; summary?: string }
+        pushNotification({ id: `model-error-${data.accountId ?? "unknown"}`, kind: "error", title: "KI-Prüfung teilweise fehlgeschlagen", detail: `${data.summary ?? "Einzelne KI-Consults sind fehlgeschlagen"} (${data.model ?? "Modell"}): ${data.error ?? "unbekannter Fehler"}`, time: Date.now(), action: false })
       } else if (event.type === "profile.compiled") {
         // Automatische oder manuelle Rekompilierung des Profilmodells melden,
         // damit klar ist, ab wann Indikatoren/Prompt frisch sind.

@@ -336,9 +336,9 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		learned.ProfilePrompt = profilePrompt
 	}
 
-	// modelErr sammelt den ersten KI-Ausfall dieses Laufs (z. B. Ollama nicht
-	// erreichbar); am Ende wird daraus genau eine Warnung.
-	var modelErr error
+	// modelStats zählt die KI-Consults dieses Laufs (Erfolge, Fehlerarten,
+	// Profil-Prompt-Nutzung) für die Debug-Logs und die Lauf-Warnungen.
+	stats := &modelRunStats{}
 
 	handler := func(message domain.MessageFeatures, text string) error {
 		if s.testGate != nil {
@@ -350,16 +350,21 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		if message.URLCount == 0 {
 			message.URLCount = classifier.CountURLs(text)
 		}
+		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
+		hashHex := hex.EncodeToString(hash[:])
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyFull(message, account.Profile, profileIndicators, features, scorer)
-		s.consultModel(ctx, account, message, &classification, learned, aiAll, &modelErr)
+		for _, ev := range classification.Evidence {
+			if ev.Code == classifier.CodeProfileOffTopic || ev.Code == classifier.CodeProfileTopicMatch {
+				log.Printf("debug scan %s mail=%s: Profil-Indikator %s (%s)", account.ID, hashHex[:8], ev.Code, ev.Summary)
+			}
+		}
+		s.consultModel(ctx, account, message, &classification, learned, aiAll, stats)
 		action := classifier.Decide(account.SafetyMode, classification)
 		isCandidate := action != classifier.ActionIgnore
 		// Count every arrival for the dashboard's "Eingang" series, including
 		// messages below the threshold that are not persisted as decisions.
 		// Only day + message-ID hash are stored; the log deduplicates rescans.
-		hash := sha256.Sum256([]byte(strings.ToLower(message.MessageID)))
-		hashHex := hex.EncodeToString(hash[:])
 		_, _ = s.store.LogReceived(context.Background(), account.ID, hashHex, message.ReceivedAt)
 		// Testing mode (debugScanAllMessages): also store ignored messages so the
 		// reviewer can see why they were not flagged. In normal operation only
@@ -455,8 +460,16 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		_, _ = s.store.PurgeReceivedLog(context.Background())
 		// KI konfiguriert, aber nicht erreichbar: einmalig pro Lauf warnen,
 		// damit klar ist, dass die KI-Filterung ausgefallen ist.
-		if modelErr != nil && s.hub != nil {
-			s.hub.Publish("model.unavailable", map[string]string{"accountId": account.ID, "model": account.OllamaModel, "error": redactError(modelErr)})
+		log.Printf("scan %s: KI-Zusammenfassung consults=%d ok=%d nicht_erreichbar=%d andere_fehler=%d profilPrompt=%t indikatoren=%t", account.ID, stats.consulted, stats.ok, stats.unreachable, stats.other, stats.profilePrompt, profileIndicators != nil)
+		if s.hub != nil {
+			switch {
+			case stats.ok == 0 && stats.unreachable > 0:
+				s.hub.Publish("model.unavailable", map[string]string{"accountId": account.ID, "model": account.OllamaModel, "error": redactError(stats.firstErr)})
+			case stats.other > 0:
+				// Einzelfehler (Timeout, Kontext, Modell-404 …) sind KEIN
+				// „Ollama läuft nicht“ – echte Ursache kommunizieren.
+				s.hub.Publish("model.error", map[string]string{"accountId": account.ID, "model": account.OllamaModel, "error": redactError(stats.firstErr), "summary": fmt.Sprintf("%d von %d KI-Consults fehlgeschlagen", stats.other, stats.consulted)})
+			}
 		}
 		// Veraltetes Kompilat? Nach dem Lauf automatisch neu kompilieren, damit
 		// Profiländerungen nie still ungenutzt bleiben.
@@ -561,13 +574,33 @@ func (s *Scanner) recompileProfile(ctx context.Context, account domain.AccountCo
 	return model, nil
 }
 
+// modelRunStats zählt die KI-Consults eines Laufs und merkt sich, ob der
+// kompilierte Profil-Prompt mitgeschickt wurde – die Basis für die
+// Debug-Logs und für die Unterscheidung „Ollama down“ vs. Einzelfehler.
+type modelRunStats struct {
+	consulted     int
+	ok            int
+	unreachable   int
+	other         int
+	firstErr      error
+	profilePrompt bool
+}
+
+// mailDebugID liefert einen kurzen stabilen Bezeichner für Logs (erste 8 Hex-
+// Zeichen des Message-ID-Hashes) – im Log lesbar, ohne Adressen im Klartext
+// zu schreiben.
+func mailDebugID(messageID string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(messageID))))
+	return hex.EncodeToString(sum[:4])
+}
+
 // consultModel runs the optional local Ollama classification and merges a
 // validated verdict as a single independent signal group. On an explicit full
 // scan (aiAll) it reviews every message that is not already near-certain spam,
 // so low-scoring mail the rules missed still gets a second opinion; on
 // incremental/new-mail scans only the ambiguous band is sent, keeping live
 // detection fast and the machine free.
-func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool, modelErr *error) bool {
+func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig, message domain.MessageFeatures, classification *domain.Classification, learned *provider.LearnedContext, aiAll bool, stats *modelRunStats) bool {
 	if !account.AIEnabled || !account.OllamaValidated || account.OllamaModel == "" {
 		return false
 	}
@@ -577,15 +610,26 @@ func (s *Scanner) consultModel(ctx context.Context, account domain.AccountConfig
 	if !aiAll && classification.Score < 0.25 {
 		return false
 	}
+	stats.consulted++
+	hasPrompt := learned != nil && strings.TrimSpace(learned.ProfilePrompt) != ""
+	if hasPrompt {
+		stats.profilePrompt = true
+	}
 	verdict, err := s.ollama.Classify(ctx, account.OllamaModel, message, account.Profile, learned)
 	if err != nil {
-		// Ersten Fehler pro Lauf merken: Der Scan warnt am Ende einmalig,
-		// dass die KI-Filterung ausgefallen ist (z. B. Ollama nicht gestartet).
-		if modelErr != nil && *modelErr == nil {
-			*modelErr = err
+		if stats.firstErr == nil {
+			stats.firstErr = err
 		}
+		if errors.Is(err, provider.ErrUnreachable) {
+			stats.unreachable++
+		} else {
+			stats.other++
+		}
+		log.Printf("debug scan %s mail=%s: KI-Consult FEHLER: %v", account.ID, mailDebugID(message.MessageID), err)
 		return false
 	}
+	stats.ok++
+	log.Printf("debug scan %s mail=%s: KI-Consult ok model=%s profilPrompt=%t verdict=%s score=%.2f", account.ID, mailDebugID(message.MessageID), account.OllamaModel, hasPrompt, verdict.Class, verdict.Score)
 	classification.ModelUsed = account.OllamaModel
 	classification.ModelValidated = true
 	classification.Evidence = append(classification.Evidence, domain.Evidence{Group: "model", Code: "local_model_" + verdict.Class, Weight: verdict.Score, Summary: "Lokales validiertes Modell: " + verdict.Class})

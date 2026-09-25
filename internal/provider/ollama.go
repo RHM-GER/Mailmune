@@ -24,6 +24,11 @@ var ErrNonLoopback = errors.New("ollama endpoint must be bound to loopback")
 // promptVersion pins the classification prompt contract. Changing the prompt
 // or the expected JSON shape requires a new version and a re-validation of
 // the model.
+// ErrUnreachable markiert Verbindungsfehler zum Ollama-Dienst (Dienst läuft
+// nicht / Port zu). Andere Fehler (Timeout, Kontext, Modell-404) sind KEIN
+// „Ollama läuft nicht“ und werden getrennt behandelt.
+var ErrUnreachable = errors.New("ollama nicht erreichbar")
+
 const promptVersion = "mailmune-classify-v2"
 
 // systemInstruction guides the local model. It names the spam categories that
@@ -224,7 +229,7 @@ func (o *Ollama) rawGenerate(ctx context.Context, model, prompt string, format m
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ollama request: %w", err)
+		return "", fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
