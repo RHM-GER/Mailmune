@@ -212,6 +212,13 @@ button:disabled {
   animation: toast-pulse 1.1s ease-in-out infinite;
 }
 
+/* WebView2/Edge malt ein eigenes Passwort-Auge in type=password-Felder –
+   das kollidiert mit unserem Toggle-Icon. Abschalten. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 @keyframes toast-enter {
   from {
     opacity: 0;

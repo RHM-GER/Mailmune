@@ -1650,6 +1650,7 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
         {draft.profile.expectedMailTypes.length > 0 && <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1.5">{draft.profile.expectedMailTypes.map((type) => <span key={type} className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[#ccc]">{type}<button type="button" aria-label={`${type} entfernen`} onClick={() => removeMailType(type)} className="text-[#777] transition-colors hover:text-white"><X className="size-3" /></button></span>)}</div>}
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">{mailTypePresets.filter((preset) => !draft.profile.expectedMailTypes.includes(preset)).map((preset) => <button key={preset} type="button" onClick={() => addMailTypeValue(preset)} className="flex items-center gap-1 rounded-md border border-dashed border-white/15 px-2.5 py-1 text-xs text-[#777] transition-colors hover:border-white/30 hover:text-[#ccc]"><Plus className="size-3" />{preset}</button>)}</div>
       </Field>
+      <Field label="Vertrauenswürdige Absender (optional)"><Textarea className="min-h-16 px-3.5 py-3" placeholder={"Eine E-Mail-Adresse oder Domain pro Zeile\nlieferant@beispiel.de"} value={(draft.profile.trustedSenders ?? []).join("\n")} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, trustedSenders: event.target.value.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean) } })} /></Field>
       <Field label="Ungewöhnlich, aber legitim"><Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Newsletter von Design-Blogs, Rechnungen vom Hosting-Anbieter, Mails von Freelancern" value={draft.profile.context} onChange={(event) => setDraft({ ...draft, profile: { ...draft.profile, context: event.target.value } })} /></Field>
       <div className="space-y-2">
         <div className="flex items-center gap-2"><Label>Was erwartest du hier niemals?</Label><InfoTooltip><p>Daraus leitet die KI die profilspezifischen Fremdkampagnen ab, die der Filter ausschließen soll.</p></InfoTooltip></div>
@@ -1948,7 +1949,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   </div>
 }
 
-function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hideTrigger }: { refresh: () => void; onCreated?: (id: string) => void; open?: boolean; onOpenChange?: (open: boolean) => void; hideTrigger?: boolean }) {
+function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hideTrigger }: { refresh: () => void; onCreated?: (id: string) => void; open?: boolean; onOpenChange: (open: boolean) => void; hideTrigger?: boolean }) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
   const setOpen: (value: boolean) => void = onOpenChange ?? setInternalOpen
@@ -1956,21 +1957,89 @@ function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hi
   const [saving, setSaving] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
-  const [preferences, setPreferences] = useState({ customers: true, suppliers: true, newsletters: true, automatedAccounts: true })
-  const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: "Deutsch", whitelist: "", context: "", unexpected: "" })
-  const steps = ["Verbindung", "Profil", "Regeln", "Prüfen"]
+  const [mailTypeDraft, setMailTypeDraft] = useState("")
+  // Dieselben Felder wie im Bearbeitungs-Dialog: Einrichtung und Bearbeitung
+  // dürfen nicht unterschiedlich reduziert sein.
+  const [form, setForm] = useState({ name: "STRATO", host: "imap.strato.de", port: "993", username: "", password: "", purpose: "", industry: "", languages: ["Deutsch"], mailTypes: [] as string[], whitelist: "", context: "", unexpected: "" })
+  const steps = ["Verbindung", "Profil", "Prüfen"]
   const trustedSenders = form.whitelist.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean)
-  const save = async () => { setSaving(true); setError(""); const id = crypto.randomUUID(); try { await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, aiEnabled: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, unexpected: form.unexpected, industry: form.industry, languages: form.languages.split(/[,;]/).map((value) => value.trim()).filter(Boolean), expectedMailTypes: [preferences.customers && "Kundenanfragen", preferences.suppliers && "Lieferanten", preferences.newsletters && "Newsletter", preferences.automatedAccounts && "Automatische Kontomails"].filter(Boolean), trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: preferences.newsletters ? ["Erwünschte Newsletter"] : [], legitimateAutomated: preferences.automatedAccounts ? ["Konten und Portale"] : [] } }, password: form.password }); setOpen(false); setStep(0); await refresh(); onCreated?.(id) } catch (reason) { setError(reason instanceof Error ? reason.message : "Postfach konnte nicht gespeichert werden") } finally { setSaving(false) } }
-  return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>{!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}<DialogContent className="max-h-[88vh] overflow-y-auto border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[720px]"><DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader><div className="grid grid-cols-4 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div><div className="min-h-[340px] py-3">
-    {step === 0 && <div className="grid gap-5"><Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /><p className="mt-1 text-[11px] text-[#666]">Dieser Name erscheint später auf der Postfach-Card.</p></Field><div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div><Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field><Field label="App-Passwort"><div className="relative"><Input className="h-12 px-3.5 pr-12" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div></Field><p className="text-xs leading-5 text-[#666]">Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></div>}
-    {step === 1 && <div className="grid gap-5"><Field label="Branche (optional)"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Handwerk" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field><Field label="Zweck des Postfachs (optional)"><Textarea className="min-h-28 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Lieferanten und Rechnungen eines Fliesenlegerbetriebs" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field><Field label="Erwartete Sprachen (optional)"><Input className="h-12 px-3.5" placeholder="Deutsch, Englisch" value={form.languages} onChange={(e) => setForm({...form,languages:e.target.value})} /></Field></div>}
-    {step === 2 && <div className="grid gap-5"><div className="flex items-center gap-2"><p className="text-sm font-medium">Was gehört normalerweise in dieses Postfach?</p><InfoTooltip><p>Alle Angaben sind optional. Je mehr legitime Nachrichtentypen bekannt sind, desto besser lassen sich Fehlalarme vermeiden.</p></InfoTooltip></div><div className="grid grid-cols-2 gap-3">{([['customers','Kundenanfragen','Anfragen, Angebote und Rückfragen'],['suppliers','Lieferanten','Bestellungen, Versand und Rechnungen'],['newsletters','Newsletter','Erwünschte Newsletter berücksichtigen'],['automatedAccounts','Konten und Portale','Logins, Bestätigungen und Systemmails']] as const).map(([key,title,detail]) => <PreferenceCard key={key} title={title} detail={detail} enabled={preferences[key]} onEnabled={(enabled) => setPreferences((current) => ({ ...current, [key]: enabled }))} />)}</div><Field label="Whitelist (optional)"><Textarea className="min-h-24 px-3.5 py-3" placeholder={'Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de\nkunde@firma.de'} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field><Field label="Weitere Beschreibung (optional)"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Beschreibe kurz ungewöhnliche, aber legitime E-Mails." value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field><div className="space-y-2"><div className="flex items-center gap-2"><Label>Was erwartest du hier niemals? (optional)</Label><InfoTooltip><p>Die KI leitet daraus ab, welche Werbekampagnen für dieses Postfach grundsätzlich fremd sind – je konkreter, desto besser.</p></InfoTooltip></div><Textarea className="min-h-20 px-3.5 py-3" placeholder={'Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Kaltakquise von Agenturen'} value={form.unexpected} onChange={(e) => setForm({...form,unexpected:e.target.value})} /></div></div>}
-    {step === 3 && <div className="space-y-4"><div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><p className="text-sm font-medium">{form.name || "Postfach"}</p><p className="mt-1 text-xs text-[#666]">{form.username} · {form.host}:{form.port}</p></div><div className="grid grid-cols-2 gap-3 text-xs"><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Profil</p><p className="mt-2 leading-5">{form.industry || "Keine Branche"}<br />{form.languages || "Keine Sprache"}</p></div><div className="rounded-[10px] border border-white/10 p-4"><p className="text-[#666]">Whitelist</p><p className="mt-2 leading-5">{trustedSenders.length} bestätigte Absender</p></div></div><p className="text-xs leading-5 text-[#666]">Nach dem Verbinden wird ausschließlich lesend geprüft. Automatische Verschiebungen bleiben deaktiviert, bis der Trockenlauf bestätigt wurde.</p>{error && <p role="alert" className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs text-[#bbb]">{error}</p>}</div>}
-  </div><DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => step === 0 ? setOpen(false) : setStep((current) => current - 1)}>{step === 0 ? "Abbrechen" : "Zurück"}</Button>{step < steps.length - 1 ? <Button disabled={step === 0 && (!form.host || !form.username || !form.password)} onClick={() => setStep((current) => current + 1)}>Weiter</Button> : <Button disabled={saving} onClick={() => void save()}>{saving ? "Verbindet …" : "Sicher verbinden"}</Button>}</DialogFooter></DialogContent></Dialog>
-}
-
-function PreferenceCard({ title, detail, enabled, onEnabled }: { title: string; detail: string; enabled: boolean; onEnabled: (enabled: boolean) => void }) {
-  return <div className="flex min-h-24 items-start gap-3 rounded-[10px] border border-white/10 bg-[#202020] p-4"><div className="min-w-0 flex-1"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-[#666]">{detail}</p></div><Switch checked={enabled} onCheckedChange={onEnabled} /></div>
+  const addMailTypeValue = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed || form.mailTypes.includes(trimmed)) return
+    setForm({ ...form, mailTypes: [...form.mailTypes, trimmed] })
+  }
+  const addMailType = () => {
+    addMailTypeValue(mailTypeDraft)
+    setMailTypeDraft("")
+  }
+  const removeMailType = (value: string) => setForm({ ...form, mailTypes: form.mailTypes.filter((item) => item !== value) })
+  const save = async () => {
+    setSaving(true)
+    setError("")
+    const id = crypto.randomUUID()
+    try {
+      await agentRequest("POST", "/v1/accounts", { account: { id, name: form.name, host: form.host, port: Number(form.port) || 993, username: form.username, inboxFolder: "INBOX", sentFolder: "Sent", spamFolder: "AI_SPAM_FILTER", safetyMode: "safe", enabled: true, dryRun: true, aiEnabled: true, ollamaValidated: false, profile: { purpose: form.purpose, context: form.context, unexpected: form.unexpected, industry: form.industry, languages: form.languages, expectedMailTypes: form.mailTypes, trustedDomains: [], trustedSenders, deniedSenders: [], deniedDomains: [], deniedKeywords: [], wantedNewsletters: [], legitimateAutomated: [] } }, password: form.password })
+      setOpen(false)
+      setStep(0)
+      await refresh()
+      onCreated?.(id)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setStep(0) }}>
+    {!hideTrigger && <DialogTrigger render={<Button size="icon-sm" aria-label="Postfach hinzufügen"><Plus /></Button>} />}
+    <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden border-white/[0.08] bg-[#1d1d1d] p-6 sm:max-w-[640px]">
+      <DialogHeader><DialogTitle>Postfach verbinden</DialogTitle><DialogDescription>Schritt {step + 1} von {steps.length} · {steps[step]}</DialogDescription></DialogHeader>
+      <div className="grid grid-cols-3 gap-2 py-2">{steps.map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= step ? "bg-white" : "bg-white/10"}`} /><p className={`mt-2 text-[11px] ${index === step ? "text-white" : "text-[#666]"}`}>{label}</p></div>)}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto py-3 [scrollbar-gutter:stable]">
+      {step === 0 && <div className="space-y-5">
+        <Field label="Name des Postfachs"><Input className="h-12 px-3.5" placeholder="Zum Beispiel STRATO Geschäftlich" value={form.name} onChange={(e) => setForm({...form,name:e.target.value})} /></Field>
+        <div className="grid grid-cols-[1fr_160px] gap-4"><Field label="IMAP-Server"><Input className="h-12 px-3.5" value={form.host} onChange={(e) => setForm({...form,host:e.target.value})} /></Field><Field label="Port"><Input className="h-12 px-3.5" inputMode="numeric" value={form.port} onChange={(e) => setForm({...form,port:e.target.value})} /></Field></div>
+        <Field label="E-Mail / Benutzername"><Input className="h-12 px-3.5" placeholder="name@beispiel.de" value={form.username} onChange={(e) => setForm({...form,username:e.target.value})} /></Field>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2"><Label>App-Passwort</Label><InfoTooltip><p>Die Zugangsdaten werden im Schlüsselbund des Betriebssystems gespeichert. Die Ersteinrichtung beginnt im Trockenlauf.</p></InfoTooltip></div>
+          <div className="relative"><Input className="h-12 px-3.5 pr-11" autoComplete="new-password" type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => setForm({...form,password:e.target.value})} /><button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-[#777] transition-colors hover:text-white" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Passwort ausblenden" : "Passwort anzeigen"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div>
+        </div>
+      </div>}
+      {step === 1 && <div className="space-y-6">
+        <Field label="Zweck des Postfachs"><Textarea className="min-h-20 px-3.5 py-3" placeholder="Zum Beispiel: Kundenanfragen, Angebote und Rechnungen einer Design-Agentur für Websites und Logos" value={form.purpose} onChange={(e) => setForm({...form,purpose:e.target.value})} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Branche"><Input className="h-12 px-3.5" placeholder="Zum Beispiel Design und Medien" value={form.industry} onChange={(e) => setForm({...form,industry:e.target.value})} /></Field>
+          <Field label="Erwartete Sprachen"><LanguageMultiSelect value={form.languages} onChange={(next) => setForm({ ...form, languages: next })} /></Field>
+        </div>
+        <Field label="Welche Mails erwartest du?">
+          <div className="flex gap-2">
+            <Input className="h-12 flex-1 px-3.5" placeholder="Mailtyp eingeben, Enter drücken" value={mailTypeDraft} onChange={(event) => setMailTypeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addMailType() } }} />
+            <button type="button" aria-label="Mailtyp hinzufügen" onClick={addMailType} disabled={!mailTypeDraft.trim()} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.05] text-[#a8a8a8] transition-colors hover:bg-white/[0.08] hover:text-white disabled:pointer-events-none disabled:opacity-40"><CornerDownLeft className="size-4" /></button>
+          </div>
+          {form.mailTypes.length > 0 && <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1.5">{form.mailTypes.map((type) => <span key={type} className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-[#ccc]">{type}<button type="button" aria-label={`${type} entfernen`} onClick={() => removeMailType(type)} className="text-[#777] transition-colors hover:text-white"><X className="size-3" /></button></span>)}</div>}
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">{mailTypePresets.filter((preset) => !form.mailTypes.includes(preset)).map((preset) => <button key={preset} type="button" onClick={() => addMailTypeValue(preset)} className="flex items-center gap-1 rounded-md border border-dashed border-white/15 px-2.5 py-1 text-xs text-[#777] transition-colors hover:border-white/30 hover:text-[#ccc]"><Plus className="size-3" />{preset}</button>)}</div>
+        </Field>
+        <Field label="Vertrauenswürdige Absender (optional)"><Textarea className="min-h-16 px-3.5 py-3" placeholder={"Eine E-Mail-Adresse pro Zeile\nlieferant@beispiel.de"} value={form.whitelist} onChange={(e) => setForm({...form,whitelist:e.target.value})} /></Field>
+        <Field label="Ungewöhnlich, aber legitim"><Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Newsletter von Design-Blogs, Rechnungen vom Hosting-Anbieter" value={form.context} onChange={(e) => setForm({...form,context:e.target.value})} /></Field>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2"><Label>Was erwartest du hier niemals? (optional)</Label><InfoTooltip><p>Die KI leitet daraus ab, welche Werbekampagnen für dieses Postfach grundsätzlich fremd sind – je konkreter, desto besser.</p></InfoTooltip></div>
+          <Textarea className="min-h-16 px-3.5 py-3" placeholder="Zum Beispiel: Diät-Werbung, Krypto-Anlagen, Krankenkassen-Lockangebote, Kaltakquise von Agenturen" value={form.unexpected} onChange={(e) => setForm({...form,unexpected:e.target.value})} />
+        </div>
+      </div>}
+      {step === 2 && <div className="space-y-4">
+        <div className="rounded-[10px] border border-white/10 bg-[#202020] p-4"><p className="text-sm font-medium">{form.name || "Postfach"}</p><p className="mt-1 text-xs text-[#666]">{form.username} · {form.host}:{form.port}</p></div>
+        <div className="space-y-1.5 text-xs leading-5 text-[#888]">
+          <p>Zweck: {form.purpose || "–"}</p>
+          <p>Branche: {form.industry || "–"} · Sprachen: {form.languages.join(", ") || "–"}</p>
+          <p>Mailtypen: {form.mailTypes.join(", ") || "–"}</p>
+          <p>Whitelist: {trustedSenders.length} Einträge</p>
+          <p>Niemals erwartet: {form.unexpected || "–"}</p>
+        </div>
+        {error && <p className="text-xs leading-5 text-[#e07a5f]">{error}</p>}
+      </div>}
+      </div>
+      <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => step === 0 ? setOpen(false) : setStep((current) => current - 1)}>{step === 0 ? "Abbrechen" : "Zurück"}</Button>{step < steps.length - 1 ? <Button disabled={step === 0 && (!form.host || !form.username || !form.password)} onClick={() => setStep((current) => current + 1)}>Weiter</Button> : <Button disabled={saving} onClick={() => void save()}>{saving ? "Speichere…" : "Verbinden"}</Button>}</DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div> }
