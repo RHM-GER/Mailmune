@@ -255,6 +255,28 @@ var migrations = []migration{
 			`ALTER TABLE accounts ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 1`,
 		},
 	},
+	{
+		id:   11,
+		name: "embedding_fast_path",
+		stmts: []string{
+			// Fast-Path-Embedding-Modell pro Postfach (leer = aus).
+			`ALTER TABLE accounts ADD COLUMN embedding_model TEXT NOT NULL DEFAULT ''`,
+			// Klassen-Schwerpunkte im Vektorraum eines Embedding-Modells,
+			// erzeugt aus einem externen Korpus (mltool embed). JSON-Vektoren,
+			// ein Satz pro Modellname.
+			`CREATE TABLE IF NOT EXISTS embedding_centroids (
+ model TEXT PRIMARY KEY,
+ dim INTEGER NOT NULL,
+ spam_center TEXT NOT NULL,
+ ham_center TEXT NOT NULL,
+ spam_n INTEGER NOT NULL,
+ ham_n INTEGER NOT NULL,
+ source TEXT NOT NULL,
+ license TEXT NOT NULL,
+ created_at TEXT NOT NULL
+)`,
+		},
+	},
 }
 
 func (s *SQLite) migrate(ctx context.Context) error {

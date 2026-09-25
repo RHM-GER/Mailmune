@@ -182,6 +182,56 @@ func (o *Ollama) Classify(ctx context.Context, model string, msg domain.MessageF
 	return o.generate(ctx, model, input)
 }
 
+// embedResponse ist die Antwort von Ollama /api/embed.
+type embedResponse struct {
+	Embeddings [][]float64 `json:"embeddings"`
+}
+
+// Embed berechnet Vektoren über Ollamas /api/embed. Embedding-Modelle (z. B.
+// qwen3-embedding) generieren keinen Text – der /api/generate-Pfad der
+// Klassifizierung funktioniert mit ihnen nicht, deshalb dieser eigene Weg.
+// Die Reihenfolge der Vektoren entspricht exakt der Eingabe.
+func (o *Ollama) Embed(ctx context.Context, model string, texts []string) ([][]float64, error) {
+	if model == "" {
+		return nil, errors.New("model is required")
+	}
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	o.serial.Lock()
+	defer o.serial.Unlock()
+	body := map[string]any{"model": model, "input": texts}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/embed", bytes.NewReader(encoded))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("Modell %q ist nicht in Ollama installiert oder kein Embedding-Modell. In einem Terminal ausführen: ollama pull %s", model, model)
+		}
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ollama embed returned %s: %s", resp.Status, strings.TrimSpace(string(detail)))
+	}
+	var outer embedResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&outer); err != nil {
+		return nil, err
+	}
+	if len(outer.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("ollama embed lieferte %d Vektoren für %d Eingaben", len(outer.Embeddings), len(texts))
+	}
+	return outer.Embeddings, nil
+}
+
 // generate performs one strictly validated model call. It is serialized and
 // rejects every response that does not match the verdict contract exactly.
 func (o *Ollama) generate(ctx context.Context, model string, input map[string]any) (ModelVerdict, error) {

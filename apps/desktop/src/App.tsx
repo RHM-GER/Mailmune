@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
 import type { Account, AgentEvent, DailyStat, Decision, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
@@ -570,11 +570,12 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
     </div>
   }
   return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
-    <div role="status" className="flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
+    <div role="status" className="pointer-events-auto flex w-80 max-w-[calc(100vw-3rem)] items-start gap-3 rounded-xl border border-white/10 bg-[#232323] p-4 shadow-xl">
       <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${finished ? "" : "toast-pulse"}`} style={{ background: indicator }} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-1 text-xs leading-5 text-[#888]">{detail}</p>
+        {!finished && <div className="mt-2 flex justify-end"><button type="button" onClick={() => { void cancelScan(notice.run.accountId).catch((cause) => showToast(cause instanceof Error ? cause.message : String(cause), "error")) }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] text-[#aaa] transition-colors hover:bg-white/[0.08] hover:text-white">Abbrechen</button></div>}
       </div>
       {!finished && <button type="button" onClick={() => setCollapsed(true)} aria-label="Prüffortschritt minimieren" className="shrink-0 rounded-md p-1 text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white"><Minus className="size-3.5" /></button>}
     </div>

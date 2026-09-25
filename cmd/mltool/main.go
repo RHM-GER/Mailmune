@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/RHM-GER/Mailmune/internal/corpus"
+	"github.com/RHM-GER/Mailmune/internal/domain"
+	"github.com/RHM-GER/Mailmune/internal/provider"
 	"github.com/RHM-GER/Mailmune/internal/eval"
 	"github.com/RHM-GER/Mailmune/internal/learning"
 	"github.com/RHM-GER/Mailmune/internal/service"
@@ -33,6 +35,8 @@ func main() {
 		evalCommand(os.Args[2:])
 	case "import":
 		importCommand(os.Args[2:])
+	case "embed":
+		embedCommand(os.Args[2:])
 	default:
 		usage()
 	}
@@ -44,6 +48,8 @@ func usage() {
 Usage:
   mltool eval   <corpus.csv> [--max N] [--thresholds 0.4,0.5,0.6,0.7,0.8]
   mltool import <mailmune.db> <corpus.csv> --source "name/url" --license MIT [--max N]
+  mltool embed  <mailmune.db> <corpus.csv> --model qwen3-embedding:0.6b \
+                --source "name/url" --license MIT [--max N] [--batch 16] [--ollama URL]
 
 Corpus: CSV with a header and a label + text column.
 Labels: 0/ham -> ham, 1/2/spam/phish -> spam.
@@ -158,4 +164,121 @@ func parseThresholds(raw string) []float64 {
 		out = []float64{0.5}
 	}
 	return out
+}
+
+// embedCommand berechnet die Spam-/Ham-Zentroide eines Embedding-Modells
+// (z. B. qwen3-embedding:0.6b) aus einem lokalen Korpus und legt sie in der
+// Agent-Datenbank ab. Die Vektoren kommen gebatcht von Ollama /api/embed;
+// es wird nichts hochgeladen und nichts generiert.
+func embedCommand(args []string) {
+	flags := flag.NewFlagSet("embed", flag.ExitOnError)
+	model := flags.String("model", "", "Embedding-Modell in Ollama (z. B. qwen3-embedding:0.6b); Pflicht")
+	ollamaURL := flags.String("ollama", "http://127.0.0.1:11434", "Ollama-Basis-URL")
+	batchSize := flags.Int("batch", 16, "Eingaben pro /api/embed-Aufruf")
+	maxRows := flags.Int("max", 20000, "maximale Samples insgesamt (balanciert über beide Klassen)")
+	source := flags.String("source", "", "Herkunft des Korpus (Name/URL); Pflicht")
+	license := flags.String("license", "", "Lizenz des Korpus (z. B. MIT); Pflicht")
+	_ = flags.Parse(args)
+	if flags.NArg() < 2 || *model == "" || *source == "" || *license == "" || *batchSize < 1 || *maxRows < 200 {
+		usage()
+	}
+	dbPath, corpusPath := flags.Arg(0), flags.Arg(1)
+
+	samples, err := corpus.LoadFile(corpusPath, corpus.Options{MaxRows: *maxRows * 2})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var spam, ham []corpus.Sample
+	for _, sample := range samples {
+		if sample.Class == learning.ClassSpam {
+			spam = append(spam, sample)
+		} else {
+			ham = append(ham, sample)
+		}
+	}
+	perClass := *maxRows / 2
+	if len(spam) > perClass {
+		spam = spam[:perClass]
+	}
+	if len(ham) > perClass {
+		ham = ham[:perClass]
+	}
+	if len(spam) < 100 || len(ham) < 100 {
+		log.Fatalf("zu wenige Samples pro Klasse (spam=%d ham=%d)", len(spam), len(ham))
+	}
+
+	client, err := provider.NewOllama(*ollamaURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := context.Background()
+	centerOf := func(label string, set []corpus.Sample) ([]float64, error) {
+		var center []float64
+		count := 0
+		for start := 0; start < len(set); start += *batchSize {
+			end := start + *batchSize
+			if end > len(set) {
+				end = len(set)
+			}
+			texts := make([]string, 0, end-start)
+			for _, sample := range set[start:end] {
+				text := sample.Text
+				if len(text) > 8000 {
+					text = text[:8000]
+				}
+				texts = append(texts, text)
+			}
+			vectors, err := client.Embed(ctx, *model, texts)
+			if err != nil {
+				return nil, err
+			}
+			for _, vector := range vectors {
+				if center == nil {
+					center = make([]float64, len(vector))
+				}
+				if len(vector) != len(center) {
+					return nil, fmt.Errorf("inkonsistente Vektorlängen vom Modell %q", *model)
+				}
+				for i, value := range vector {
+					center[i] += value
+				}
+				count++
+			}
+			fmt.Printf("\r%s: %d/%d Vektoren ", label, count, len(set))
+		}
+		fmt.Println()
+		if count == 0 || center == nil {
+			return nil, fmt.Errorf("keine Vektoren für %s erhalten", label)
+		}
+		for i := range center {
+			center[i] /= float64(count)
+		}
+		return center, nil
+	}
+
+	spamCenter, err := centerOf("Spam", spam)
+	if err != nil {
+		log.Fatal(err)
+	}
+	hamCenter, err := centerOf("Ham", ham)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	record := domain.EmbeddingCentroids{
+		Model: *model, Dim: len(spamCenter),
+		SpamCenter: spamCenter, HamCenter: hamCenter,
+		SpamN: len(spam), HamN: len(ham),
+		Source: *source, License: *license, CreatedAt: time.Now().UTC(),
+	}
+	if err := db.SaveEmbeddingCentroids(ctx, record); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Zentroide gespeichert: model=%s dim=%d spam=%d ham=%d (%s, %s)\n", record.Model, record.Dim, record.SpamN, record.HamN, record.Source, record.License)
+	fmt.Println("Fast-Pfad aktiv, sobald im Postfach dieses Embedding-Modell gewählt ist.")
 }

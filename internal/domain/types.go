@@ -32,6 +32,10 @@ type AccountConfig struct {
 	SpamFolder      string         `json:"spamFolder"`
 	SafetyMode      SafetyMode     `json:"safetyMode"`
 	OllamaModel     string         `json:"ollamaModel,omitempty"`
+	// EmbeddingModel ist das schnelle System-1-Modell (z. B.
+	// qwen3-embedding:0.6b): erzeugt Vektoren statt Text, daraus wird eine
+	// Zentroid-Ähnlichkeit als eigene Signalgruppe berechnet. Leer = aus.
+	EmbeddingModel  string         `json:"embeddingModel,omitempty"`
 	OllamaValidated bool           `json:"ollamaValidated"`
 	// AIEnabled ist der Hauptschalter der KI-Filterung pro Postfach: Aus =
 	// ausschließlich Regeln/Lernfilter, An = das validierte lokale Modell
@@ -221,6 +225,21 @@ type DailyStat struct {
 	// Missed is spam a human or external filter moved into the spam folder
 	// although Mailmune never flagged it ("Nicht erkannt").
 	Missed int `json:"missed"`
+}
+
+// EmbeddingCentroids sind die Klassen-Schwerpunkte (Spam/Ham) im Vektorraum
+// eines Embedding-Modells, trainiert aus einem externen Korpus. Sie sind die
+// Basis des schnellen Embedding-Signals; pro Modellname ein Satz.
+type EmbeddingCentroids struct {
+	Model      string    `json:"model"`
+	Dim        int       `json:"dim"`
+	SpamCenter []float64 `json:"spamCenter"`
+	HamCenter  []float64 `json:"hamCenter"`
+	SpamN      int       `json:"spamN"`
+	HamN       int       `json:"hamN"`
+	Source     string    `json:"source"`
+	License    string    `json:"license"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // FolderSyncState is the persisted UID synchronization state of one folder.

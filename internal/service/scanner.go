@@ -307,6 +307,17 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 	// Neugenerierung an).
 	var profileIndicators *domain.ProfileIndicators
 	var profilePrompt string
+	// Embedding-Fast-Pfad: Zentroide nur laden, wenn ein Embedding-Modell
+	// gewählt ist UND importierte Zentroide für genau dieses Modell liegen
+	// (Vektoren sind modellspezifisch).
+	var embedCentroids *domain.EmbeddingCentroids
+	if account.EmbeddingModel != "" {
+		if centroids, ok, err := s.store.LoadEmbeddingCentroids(ctx, account.EmbeddingModel); err == nil && ok {
+			embedCentroids = &centroids
+		} else {
+			log.Printf("scan %s: Embedding-Modell %s gewählt, aber keine Zentroide importiert (mltool embed) – Fast-Pfad inaktiv", account.ID, account.EmbeddingModel)
+		}
+	}
 	profileStale := false
 	if compiled, found, loadErr := s.store.GetProfileModel(ctx, account.ID); loadErr == nil && found && compiled.Enabled {
 		if compiled.SourceHash == ProfileSourceHash(account.Profile) {
@@ -358,6 +369,21 @@ func (s *Scanner) scanAccount(ctx context.Context, account domain.AccountConfig,
 		hashHex := hex.EncodeToString(hash[:])
 		features := learning.ExtractFeatures(message.Subject, message.From, message.FromDomain, text)
 		classification := s.rules.ClassifyFull(message, account.Profile, profileIndicators, features, scorer)
+		// Embedding-Fast-Pfad (System 1): Vektor der Mail gegen die Spam-/Ham-
+		// Zentroide – eine eigene Signalgruppe, ganz ohne Textgenerierung.
+		if embedCentroids != nil {
+			embedText := message.Subject + "\n" + message.From + "\n" + message.Text
+			if len(embedText) > 8000 {
+				embedText = embedText[:8000]
+			}
+			if vec, err := s.ollama.Embed(ctx, account.EmbeddingModel, []string{embedText}); err == nil && len(vec) == 1 && len(vec[0]) == embedCentroids.Dim {
+				margin := classifier.Cosine(vec[0], embedCentroids.SpamCenter) - classifier.Cosine(vec[0], embedCentroids.HamCenter)
+				classifier.ApplyEmbeddingMargin(&classification, margin)
+				log.Printf("debug scan %s mail=%s: embedding margin=%+.3f", account.ID, hashHex[:8], margin)
+			} else if err != nil {
+				log.Printf("debug scan %s mail=%s: embedding fehlgeschlagen: %v", account.ID, hashHex[:8], err)
+			}
+		}
 		for _, ev := range classification.Evidence {
 			if ev.Code == classifier.CodeProfileOffTopic || ev.Code == classifier.CodeProfileTopicMatch {
 				log.Printf("debug scan %s mail=%s: Profil-Indikator %s (%s)", account.ID, hashHex[:8], ev.Code, ev.Summary)

@@ -63,6 +63,7 @@
         "spamFolder": { "type": "string" },
         "safetyMode": { "$ref": "#/$defs/SafetyMode" },
         "ollamaModel": { "type": "string" },
+        "embeddingModel": { "type": "string", "description": "Embedding-Modell fuer den Fast-Pfad (z. B. qwen3-embedding:0.6b); leer = aus. Zentroide muessen per mltool embed importiert sein." },
         "ollamaValidated": { "type": "boolean" },
         "aiEnabled": { "type": "boolean", "description": "KI-Hauptschalter des Postfachs: Aus = nur Regeln/Lernfilter, An = das validierte lokale Modell prueft mit und die Desktop-App haelt Ollama am Laufen." },
         "enabled": { "type": "boolean" },

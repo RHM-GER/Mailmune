@@ -1,6 +1,7 @@
 package classifier
 
 import (
+	"fmt"
 	"math"
 	"net/mail"
 	"regexp"
@@ -46,6 +47,7 @@ const (
 	CodeProfileMismatch      = "profile_mismatch"
 	CodeFakeEndorsement      = "fake_endorsement"
 	CodeTvShowAbuse          = "tv_show_domain_abuse"
+	CodeEmbeddingSimilarity  = "embedding_similarity"
 	CodeProfileTopicMatch    = "profile_topic_match"
 	CodeProfileOffTopic      = "profile_offtopic_campaign"
 	CodeLocalModelPrefix     = "local_model_"
@@ -141,6 +143,21 @@ func (r *Rules) ClassifyFull(msg domain.MessageFeatures, profile domain.MailboxP
 
 	// A bounded logistic transform keeps independently explainable weights
 	// while preventing one weak heuristic from becoming an automatic action.
+	score, groups := scoreFromEvidence(evidence, strongTrust)
+
+	return domain.Classification{
+		Score:             score,
+		Evidence:          evidence,
+		IndependentGroups: groups,
+		StrongTrustSignal: strongTrust,
+	}
+}
+
+// scoreFromEvidence ist die einzige Stelle, die aus Evidence-Gewichten den
+// logistischen Score und die Zahl unabhängiger Signalgruppen berechnet –
+// identisch genutzt von der Pipeline und von nachträglichen Signalen wie
+// dem Embedding-Fast-Pfad.
+func scoreFromEvidence(evidence []domain.Evidence, strongTrust bool) (float64, int) {
 	logit := -1.25
 	groups := map[string]struct{}{}
 	for _, item := range evidence {
@@ -153,13 +170,43 @@ func (r *Rules) ClassifyFull(msg domain.MessageFeatures, profile domain.MailboxP
 	if strongTrust && score > 0.79 {
 		score = 0.79
 	}
+	return clamp(score), len(groups)
+}
 
-	return domain.Classification{
-		Score:             clamp(score),
-		Evidence:          evidence,
-		IndependentGroups: len(groups),
-		StrongTrustSignal: strongTrust,
+// Cosine ist die Kosinus-Ähnlichkeit zweier Vektoren; 0 bei Längen-Mismatch
+// oder Nullnorm.
+func Cosine(a, b []float64) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
 	}
+	var dot, na, nb float64
+	for i := range a {
+		dot += a[i] * b[i]
+		na += a[i] * a[i]
+		nb += b[i] * b[i]
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+// ApplyEmbeddingMargin faltet die Zentroid-Marge des Embedding-Fast-Pfads
+// (cosSpam − cosHam) als eigene Signalgruppe „embedding“ ein und berechnet
+// den Score neu (inkl. Strong-Trust-Kappung). Margen unter 0.05 gelten als
+// nicht aussagekräftig und werden ignoriert.
+func ApplyEmbeddingMargin(c *domain.Classification, margin float64) {
+	if math.Abs(margin) < 0.05 {
+		return
+	}
+	weight := margin * 0.6
+	if weight > 0.45 {
+		weight = 0.45
+	} else if weight < -0.45 {
+		weight = -0.45
+	}
+	c.Evidence = append(c.Evidence, domain.Evidence{Group: "embedding", Code: CodeEmbeddingSimilarity, Weight: weight, Summary: fmt.Sprintf("Embedding-Ähnlichkeit zu Spam-/Ham-Zentroid: Marge %+.2f", margin)})
+	c.Score, c.IndependentGroups = scoreFromEvidence(c.Evidence, c.StrongTrustSignal)
 }
 
 // stageTrust collects explicit allow-list and relationship signals. They
