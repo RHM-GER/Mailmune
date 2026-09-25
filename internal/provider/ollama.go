@@ -293,7 +293,7 @@ func (o *Ollama) generate(ctx context.Context, model string, input map[string]an
 			"reasonCodes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
 		}, "additionalProperties": false,
 	}
-	raw, err := o.rawGenerate(ctx, model, systemInstruction+"\n"+string(inputJSON), format, 512)
+	raw, err := o.rawGenerate(ctx, model, systemInstruction+"\n"+string(inputJSON), format, 2048)
 	if err != nil {
 		return ModelVerdict{}, err
 	}
@@ -352,6 +352,9 @@ func (o *Ollama) rawGenerate(ctx context.Context, model, prompt string, format m
 // sometimes wrap the answer in markdown fences or add a short preamble despite
 // the schema, so the first balanced JSON object is extracted before decoding.
 func parseVerdict(raw string) (ModelVerdict, error) {
+	if strings.TrimSpace(raw) == "" {
+		return ModelVerdict{}, errors.New("Modell hat eine LEERE Antwort geliefert – Denk-/Reasoning-Modelle (z. B. Qwen3) verbrauchen bei knappem Token-Limit oft das gesamte Budget fürs Denken. Erneut versuchen oder ein kleineres/schnelleres Modell wählen")
+	}
 	var verdict ModelVerdict
 	if err := json.Unmarshal([]byte(extractJSONObject(raw)), &verdict); err != nil {
 		return ModelVerdict{}, fmt.Errorf("invalid model JSON: %w (raw: %.160q)", err, strings.TrimSpace(raw))

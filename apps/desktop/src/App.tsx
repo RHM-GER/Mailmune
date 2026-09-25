@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, CornerDownLeft, Eye, EyeOff, Gauge, Globe2, GlobeCheck, GlobeX, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ArrowUpDown, Bell, BellDot, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleDot, Copy, CornerDownLeft, Eye, EyeOff, Gauge, Globe2, GlobeCheck, GlobeX, Inbox, Info, LayoutDashboard, ListFilter, Mail, MailCheck, MailOpen, MessageCircleWarning, Minus, Monitor, PanelLeftClose, Pencil, Plus, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Square, Tag, Table2, Text, Trash2, X } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -542,7 +542,7 @@ function ToastHost() {
         </div>
       </div>
     </div>)}
-    {hidden.length > 0 && <button type="button" onClick={() => hidden.forEach((item) => restore(item.id))} className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-[#242424] px-3 py-1.5 text-[11px] text-[#aaa] shadow-[0_20px_40px_rgba(0,0,0,.5)] transition-colors hover:bg-[#2b2b2b] hover:text-white"><BellDot className="size-3.5" />{hidden.length} minimiert – anzeigen</button>}
+    {hidden.length > 0 && <button type="button" onClick={() => hidden.forEach((item) => restore(item.id))} aria-label="Minimierte Toasts anzeigen" className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-[#242424] px-2.5 py-1.5 text-[11px] text-[#aaa] shadow-[0_20px_40px_rgba(0,0,0,.5)] transition-colors hover:bg-[#2b2b2b] hover:text-white"><MessageCircleWarning className="size-3.5" />({hidden.length})</button>}
   </div>
 }
 
