@@ -1138,9 +1138,19 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
   const [editingFolder, setEditingFolder] = useState(false)
   const [notificationThreshold, setNotificationThreshold] = useState(() => Number(readStoredValue("mailmune.notificationThreshold", "spamalytic.notificationThreshold", "90")))
   const [automaticThreshold, setAutomaticThreshold] = useState(() => Number(readStoredValue("mailmune.automaticSpamThreshold.v2", "spamalytic.automaticSpamThreshold.v2", "90")))
+  const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
+  const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
+  const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
+  const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
+  const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
+  // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
+  const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
+  // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
+  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   // KI-Verbindungsstatus des aktiven Profils für das Globe-Icon an der
-  // Postfach-Karte: erreichbar + Modell installiert. Wird beim Öffnen der
-  // Einstellungen und alle 30 s geprüft.
+  // Postfach-Karte: erreichbar + Modell installiert. Alle 30 s geprüft.
+  // WICHTIG: muss NACH der activeAccount-Deklaration stehen (TDZ).
   const [aiOk, setAiOk] = useState<boolean | null>(null)
   useEffect(() => {
     if (!isTauri() || !activeAccount?.aiEnabled) { setAiOk(null); return }
@@ -1157,16 +1167,6 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     const interval = window.setInterval(() => void check(), 30000)
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [activeAccount?.id, activeAccount?.aiEnabled, activeAccount?.ollamaModel])
-  const [fakeAccountVisible, setFakeAccountVisible] = useState(true)
-  const [connectionEnabled, setConnectionEnabled] = useState<Record<string, boolean>>({ "demo-strato": true })
-  const [weeklyReviewEnabled, setWeeklyReviewEnabled] = useState(true)
-  const [incomingReviewEnabled, setIncomingReviewEnabled] = useState(true)
-  const [deepScanEditorOpen, setDeepScanEditorOpen] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: "account" | "model"; id: string; label: string } | null>(null)
-  // Postfach-Einstellungen: Zahnrad auf der Verbindungskarte öffnet den Dialog.
-  const [settingsAccount, setSettingsAccount] = useState<Account | null>(null)
-  // Aktives Konto: zentral in der App gewählt (Account-Switcher in der Nav).
-  const activeAccount = accounts.find((item) => item.id === activeAccountId) ?? accounts[0]
   // Der Slider- und Ordnerzustand wird per useState nur einmal beim Mounten
   // gelesen. Konten laden aber asynchron und werden nach dem Speichern
   // aktualisiert; ohne diese Synchronisierung zeigt die UI weiter den
