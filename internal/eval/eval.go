@@ -184,3 +184,92 @@ func SplitDivide(samples []corpus.Sample, testEvery int) (train, test []corpus.S
 	}
 	return train, test
 }
+
+// ExtractAll computes each sample's feature vector exactly once so sweeps and
+// calibrations over several thresholds do not redo the expensive text
+// tokenization per threshold.
+func ExtractAll(samples []corpus.Sample, features FeatureFunc) []map[string]int {
+	if features == nil {
+		features = TextOnlyFeatures
+	}
+	out := make([]map[string]int, len(samples))
+	for i, sample := range samples {
+		out[i] = features(sample)
+	}
+	return out
+}
+
+// EvaluatePrecomputed behaves like Evaluate but reuses precomputed features.
+func EvaluatePrecomputed(model *learning.Model, samples []corpus.Sample, threshold float64, feats []map[string]int) Metrics {
+	metrics := Metrics{Threshold: threshold}
+	for i, sample := range samples {
+		score, ok := model.Score(feats[i])
+		if !ok {
+			metrics.Skipped++
+			continue
+		}
+		metrics.Scored++
+		predictedSpam := score >= threshold
+		actualSpam := sample.Class == learning.ClassSpam
+		switch {
+		case predictedSpam && actualSpam:
+			metrics.TP++
+		case predictedSpam && !actualSpam:
+			metrics.FP++
+		case !predictedSpam && actualSpam:
+			metrics.FN++
+		default:
+			metrics.TN++
+		}
+	}
+	metrics.compute()
+	return metrics
+}
+
+// SweepPrecomputed evaluates all thresholds on one shared feature extraction.
+func SweepPrecomputed(model *learning.Model, samples []corpus.Sample, thresholds []float64, feats []map[string]int) []Metrics {
+	sorted := append([]float64(nil), thresholds...)
+	sort.Float64s(sorted)
+	results := make([]Metrics, 0, len(sorted))
+	for _, threshold := range sorted {
+		results = append(results, EvaluatePrecomputed(model, samples, threshold, feats))
+	}
+	return results
+}
+
+// CalibrationPrecomputed buckets scores using precomputed features.
+func CalibrationPrecomputed(model *learning.Model, samples []corpus.Sample, buckets int, feats []map[string]int) []CalibrationBucket {
+	if buckets <= 0 {
+		buckets = 10
+	}
+	width := 1.0 / float64(buckets)
+	out := make([]CalibrationBucket, buckets)
+	for i := range out {
+		out[i] = CalibrationBucket{Lower: float64(i) * width, Upper: float64(i+1) * width}
+	}
+	for i, sample := range samples {
+		score, ok := model.Score(feats[i])
+		if !ok {
+			continue
+		}
+		index := int(math.Floor(score / width))
+		if index >= buckets {
+			index = buckets - 1
+		}
+		if index < 0 {
+			index = 0
+		}
+		out[index].Count++
+		out[index].MeanScore += score
+		if sample.Class == learning.ClassSpam {
+			out[index].SpamRate += 1
+		}
+	}
+	for i := range out {
+		if out[i].Count > 0 {
+			out[i].MeanScore /= float64(out[i].Count)
+			out[i].SpamRate /= float64(out[i].Count)
+		}
+	}
+	return out
+}

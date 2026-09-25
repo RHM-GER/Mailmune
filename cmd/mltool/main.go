@@ -80,7 +80,10 @@ func evalCommand(args []string) {
 	fmt.Printf("Training: %s\n\n", time.Since(start).Round(time.Millisecond))
 
 	parsed := parseThresholds(*thresholds)
-	sweep := eval.Sweep(model, test, parsed, eval.TextOnlyFeatures)
+	// Features einmal extrahieren statt pro Schwelle – der Sweep über große
+	// Holdouts wird damit um den Faktor Anzahl-Schwellen schneller.
+	feats := eval.ExtractAll(test, eval.TextOnlyFeatures)
+	sweep := eval.SweepPrecomputed(model, test, parsed, feats)
 	fmt.Printf("%-9s %-9s %-9s %-9s %-9s %-9s %s\n", "THRESH", "PREC", "RECALL", "FPR", "F1", "ACC", "TP/FP/TN/FN")
 	for _, metrics := range sweep {
 		fmt.Printf("%-9.2f %-9.3f %-9.3f %-9.3f %-9.3f %-9.3f %d/%d/%d/%d\n",
@@ -93,7 +96,7 @@ func evalCommand(args []string) {
 	}
 
 	fmt.Printf("\nKalibrierung (10 Buckets):\n%-12s %-7s %-9s %s\n", "BEREICH", "ANZAHL", "MITTEL", "SPAM-RATE")
-	for _, bucket := range eval.Calibration(model, test, 10, eval.TextOnlyFeatures) {
+	for _, bucket := range eval.CalibrationPrecomputed(model, test, 10, feats) {
 		if bucket.Count == 0 {
 			continue
 		}
