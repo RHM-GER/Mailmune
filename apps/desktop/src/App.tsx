@@ -2071,10 +2071,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]">
         <DialogHeader><DialogTitle>KI-Modell</DialogTitle><DialogDescription>Modell wählen, Installation prüfen und den Fähigkeitstest für {account.name} ausführen.</DialogDescription></DialogHeader>
         <div className="space-y-3 py-2">
-          <div>
-            <Label htmlFor="model-select">Modell wählen</Label>
-            <button type="button" onClick={() => setRecsOpen(true)} aria-label="Empfehlungen anzeigen" className="ml-1.5 text-sm font-normal text-[#666] transition-colors hover:text-[#999]">(Empfehlungen <Plus className="mb-0.5 inline size-3.5" />)</button>
-          </div>
+          <Label htmlFor="model-select">Modell wählen <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setRecsOpen(true) }} aria-label="Empfehlungen anzeigen" className="font-normal text-[#666] transition-colors hover:text-[#999]">(Empfehlungen <Plus className="mb-0.5 inline size-3.5" />)</button></Label>
           <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
             <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
               <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle installiert"} />
