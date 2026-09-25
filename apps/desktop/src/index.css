@@ -241,4 +241,11 @@ input[type="password"]::-ms-clear {
   .toast-pulse {
     animation: none;
   }
+  /* Ohne Animation muss die Zentrierung explizit kommen (sonst hängt die
+     Leiste links aus dem Container). */
+  .floating-action-enter,
+  .floating-action-exit {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
 }

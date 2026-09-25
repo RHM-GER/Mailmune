@@ -1014,7 +1014,12 @@ function FloatingActions({ visible, primary, onPrimary, onCancel, disabled = fal
     ...(middle ? [{ value: "middle" as const, label: middle.label, icon: ShieldCheck }] : []),
     { value: "cancel" as const, label: "Abbrechen", icon: X },
   ]
-  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} fixed bottom-8 left-1/2 z-40 -translate-x-1/2`}>
+  // WICHTIG: keine -translate-x-1/2-Klasse hier! Tailwind v4 setzt translate
+  // als eigene CSS-Property, die sich mit dem translate(-50%) der Enter/Exit-
+  // Animation ADDIEREN würde (-> doppelter Versatz, Leiste hängt links raus).
+  // Die Zentrierung kommt ausschließlich aus den Keyframes; für Reduced-
+  // Motion stellt die CSS-Unten den Transform explizit bereit.
+  return <div className={`${visible ? "floating-action-enter" : "floating-action-exit"} fixed bottom-8 left-1/2 z-40`}>
     <SegmentedControl
       className="shadow-[0_30px_60px_rgba(0,0,0,.45)]"
       buttonClassName="px-4 text-sm"
