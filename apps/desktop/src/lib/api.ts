@@ -297,6 +297,22 @@ export function setProfileModelEnabled(accountId: string, enabled: boolean): Pro
   return agentRequest<{ ok: boolean }>("POST", `/v1/accounts/${accountId}/profile/model/enabled`, { enabled })
 }
 
+/** Metadaten der optionalen globalen Lern-Baseline (null = nicht importiert). */
+export interface LearningBaseline {
+  id: string
+  version: number
+  source: string
+  license: string
+  corpusRows: number
+  spamMessages: number
+  hamMessages: number
+  importedAt: string
+}
+
+export function getBaseline(): Promise<{ baseline: LearningBaseline | null }> {
+  return agentRequest<{ baseline: LearningBaseline | null }>("GET", "/v1/learning/baseline")
+}
+
 /**
  * Abonniert den Agent-Eventstream (Scan-Fortschritt, neue Entscheidungen,
  * Kontostatus). Liefert eine Funktion zum Abbestellen. Außerhalb der

@@ -56,6 +56,7 @@ func New(token string, svc *service.Service) (*Server, error) {
 	mux.HandleFunc("GET /v1/decisions", s.decisions)
 	mux.HandleFunc("POST /v1/reviews", s.review)
 	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("GET /v1/learning/baseline", s.baselineStatus)
 	mux.HandleFunc("GET /v1/models/recommended", s.recommendedModels)
 	mux.HandleFunc("POST /v1/models/capability", s.capabilityTest)
 	mux.HandleFunc("POST /v1/accounts/{id}/models", s.setAccountModel)
@@ -132,6 +133,19 @@ func (s *Server) exportTransfer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) compileProfile(w http.ResponseWriter, r *http.Request) {
 	value, err := s.service.CompileAccountProfile(r.Context(), r.PathValue("id"))
 	respond(w, "profile_compile_failed", value, err)
+}
+
+func (s *Server) baselineStatus(w http.ResponseWriter, r *http.Request) {
+	meta, found, err := s.service.BaselineStatus(r.Context())
+	if err != nil {
+		respond(w, "baseline_failed", nil, err)
+		return
+	}
+	var payload any
+	if found {
+		payload = meta
+	}
+	respond(w, "baseline_failed", map[string]any{"baseline": payload}, nil)
 }
 
 func (s *Server) profileModel(w http.ResponseWriter, r *http.Request) {

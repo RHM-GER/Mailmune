@@ -96,3 +96,11 @@ func (s *Service) DeleteBaseline(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// BaselineStatus liefert die Metadaten der optionalen globalen Lern-Baseline
+// (Herkunft, Lizenz, Umfang) – die UI zeigt damit transparent, ob der externe
+// Prior aktiv ist.
+func (s *Service) BaselineStatus(ctx context.Context) (domain.LearningBaseline, bool, error) {
+	_, meta, ok, err := s.store.LoadBaseline(ctx, BaselineID)
+	return meta, ok, err
+}

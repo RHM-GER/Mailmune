@@ -343,6 +343,30 @@
       },
       "additionalProperties": false
     },
+    "LearningBaseline": {
+      "description": "Metadaten der optionalen globalen Lern-Baseline (externes Korpus, opt-in).",
+      "type": "object",
+      "required": ["id", "version", "source", "license", "corpusRows", "spamMessages", "hamMessages", "importedAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string", "description": "Herkunft (Name/URL des Korpus)." },
+        "license": { "type": "string" },
+        "corpusRows": { "type": "integer", "minimum": 0 },
+        "spamMessages": { "type": "integer", "minimum": 0 },
+        "hamMessages": { "type": "integer", "minimum": 0 },
+        "importedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "BaselineResponse": {
+      "type": "object",
+      "required": ["baseline"],
+      "properties": {
+        "baseline": { "oneOf": [{ "$ref": "#/$defs/LearningBaseline" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
     "TransferExport": {
       "description": "Portables Export-Dokument fuer Lern-/Profiltransfer auf einen anderen Rechner. Learning enthaelt nur Token-Zaehlstaende des statistischen Lerners (keine Rohtexte); beim Profiltransfer kommt das Mailbox-Profil dazu.",
       "type": "object",

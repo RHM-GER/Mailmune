@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, DailyStat, Decision, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, scanRuns, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, DailyStat, Decision, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
@@ -1742,6 +1742,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   // Erreichbarkeit von Ollama für die Status-Icons: null = noch unbekannt.
   const [reachable, setReachable] = useState<boolean | null>(null)
   const [toggling, setToggling] = useState(false)
+  const [baseline, setBaseline] = useState<LearningBaseline | null>(null)
 
   const loadModels = async () => {
     try {
@@ -1760,10 +1761,11 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     let cancelled = false
     void (async () => {
       try {
-        const [inst, rec] = await Promise.all([listModels(), recommendedModels()])
+        const [inst, rec, base] = await Promise.all([listModels(), recommendedModels(), getBaseline().catch(() => ({ baseline: null }))])
         if (cancelled) return
         setInstalled(inst ?? [])
         setRecommended(rec.models ?? [])
+        setBaseline(base.baseline ?? null)
         setReachable(true)
       } catch (error) {
         if (!cancelled) {
@@ -1925,6 +1927,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
           </div>
+          {baseline && <p className="text-xs leading-5 text-[#666]">Globale Lern-Baseline aktiv: {baseline.corpusRows.toLocaleString("de-DE")} externe Mails ({baseline.license}) wirken als begrenzter Prior neben deinem bestätigten Lernen.</p>}
         </div>
         <DialogFooter><Button variant="outline" onClick={() => setSettingsOpen(false)}>Schließen</Button></DialogFooter>
       </DialogContent>
