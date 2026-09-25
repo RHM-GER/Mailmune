@@ -210,8 +210,8 @@ export function recommendedModels(): Promise<{ version: string; models: Recommen
   return agentRequest<{ version: string; models: RecommendedModel[] }>("GET", "/v1/models/recommended")
 }
 
-export function setAccountModel(accountId: string, model: string): Promise<Account> {
-  return agentRequest<Account>("POST", `/v1/accounts/${accountId}/models`, { model })
+export function setAccountModel(accountId: string, model: string): Promise<{ account: Account; redirected: boolean }> {
+  return agentRequest<{ account: Account; redirected: boolean }>("POST", `/v1/accounts/${accountId}/models`, { model })
 }
 
 export interface CapabilityCaseResult {

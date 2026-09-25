@@ -345,7 +345,7 @@ func TestSetAccountModelClearsValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Mark validated, then change the model: validation must be cleared.
-	if _, err := svc.SetAccountModel(ctx, "acc-model", "qwen3:4b-instruct-2507"); err != nil {
+	if _, _, err := svc.SetAccountModel(ctx, "acc-model", "qwen3:4b-instruct-2507"); err != nil {
 		t.Fatal(err)
 	}
 	account, _ := db.Account(ctx, "acc-model")

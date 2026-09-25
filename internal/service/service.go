@@ -478,21 +478,30 @@ func (s *Service) RecommendedModels() (string, []provider.RecommendedModel) {
 // SetAccountModel selects a local model for an account and clears any prior
 // validation, because a different model must pass the capability test again
 // before it may contribute evidence. It never changes confirmed learning.
-func (s *Service) SetAccountModel(ctx context.Context, accountID, model string) (domain.AccountConfig, error) {
+func (s *Service) SetAccountModel(ctx context.Context, accountID, model string) (domain.AccountConfig, bool, error) {
 	account, err := s.store.Account(ctx, accountID)
 	if err != nil {
-		return domain.AccountConfig{}, err
+		return domain.AccountConfig{}, false, err
 	}
-	account.OllamaModel = model
-	account.OllamaValidated = false
+	// Auto-Erkennung: Embedding-Modelle generieren keinen Text und würden im
+	// generativen Pfad nur hängen/fehlen – sie wandern automatisch in den
+	// Fast-Pfad-Slot, statt dass Nutzer zwei Slots auseinanderhalten müssen.
+	redirected := false
+	if family, infoErr := s.ollama.ModelInfo(ctx, model); infoErr == nil && provider.IsEmbeddingModel(model, family) {
+		account.EmbeddingModel = model
+		redirected = true
+	} else {
+		account.OllamaModel = model
+		account.OllamaValidated = false
+	}
 	account.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpsertAccount(ctx, account); err != nil {
-		return domain.AccountConfig{}, err
+		return domain.AccountConfig{}, false, err
 	}
 	if s.hub != nil {
 		s.hub.Publish("account.updated", account)
 	}
-	return account, nil
+	return account, redirected, nil
 }
 
 // ValidateAccountModel runs the capability test for a model and, only when it

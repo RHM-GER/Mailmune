@@ -322,8 +322,8 @@ func (s *Server) setAccountModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err)
 		return
 	}
-	value, err := s.service.SetAccountModel(r.Context(), r.PathValue("id"), req.Model)
-	respond(w, "set_model_failed", value, err)
+	value, redirected, err := s.service.SetAccountModel(r.Context(), r.PathValue("id"), req.Model)
+	respond(w, "set_model_failed", map[string]any{"account": value, "redirected": redirected}, err)
 }
 func (s *Server) validateAccountModel(w http.ResponseWriter, r *http.Request) {
 	var req struct {

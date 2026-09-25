@@ -1950,8 +1950,14 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     setBusy(true)
     showToast("Modell wird übernommen …")
     try {
-      await setAccountModel(account.id, tag)
-      showToast(`Übernommen: ${tag}. Jetzt den Fähigkeitstest ausführen, um es zu aktivieren.`)
+      const result = await setAccountModel(account.id, tag)
+      if (result.redirected) {
+        showToast(`Automatisch als Embedding-Modell erkannt: ${tag} wirkt im Fast-Pfad (Zentroide), nicht als generatives KI-Modell.`)
+        const status = await getEmbeddingStatus(account.id).catch(() => null)
+        if (status) setEmbeddingStatus(status)
+      } else {
+        showToast(`Übernommen: ${tag}. Jetzt den Fähigkeitstest ausführen, um es zu aktivieren.`)
+      }
       await refresh()
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error")
