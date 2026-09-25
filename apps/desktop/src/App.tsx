@@ -307,11 +307,14 @@ export default function App() {
         window.clearTimeout(scanNoticeTimer.current)
         scanNoticeTimer.current = window.setTimeout(() => setScanNotice(null), 8000)
         if (data.run.status === "completed") {
-          pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: (data.candidates ?? 0) > 0 })
+          // Routine-Scans ohne Fund erzeugen KEINE Benachrichtigung – nur wenn
+          // tatsächlich etwas als Verdachtsfall markiert wurde (oder ein Lauf
+          // fehlschlägt) entsteht ein Eintrag.
+          if ((data.candidates ?? 0) > 0) {
+            pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: true })
+          }
         } else if (data.run.status === "failed") {
           pushNotification({ id: `scan-${data.run.id}`, kind: "error", title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false })
-        } else if (data.run.status === "cancelled") {
-          pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgebrochen", detail: "Der Lauf wurde manuell beendet.", time: Date.now(), action: false })
         }
       } else if (event.type === "schedule.deep_scan") {
         pushNotification({ id: `deep-${Date.now()}`, kind: "schedule", title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false })
@@ -397,7 +400,7 @@ export default function App() {
       <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
         <WindowControls />
         <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} accounts={accounts} activeAccountId={activeId} onSelectAccount={setActiveAccountId} refresh={refresh} notificationDot={hasOpenNotifications} />
-        <main className="relative min-w-0 flex-1 overflow-hidden">
+        <main className="relative min-w-0 flex-1 overflow-hidden [transform:translateZ(0)]">
           {/* Rahmenloses Fenster: dieser transparente Bereich oben ersetzt die
               native Titelleiste zum Ziehen; Doppelklick maximiert. Er liegt im
               leeren pt-12-Rand der Seiten und verdeckt keine Inhalte. */}
@@ -731,17 +734,19 @@ function DualRangeSlider({ min, max, onChange }: { min: number; max: number; onC
     window.addEventListener("pointerup", stop)
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop) }
   }, [dragging, min, max, onChange])
-  // Exakt derselbe Aufbau wie der Einstellungs-Slider (Automatische
-  // Spam-Schwelle): dunkler Füll-„Schuh“ zwischen min und max, Griff-Balken
-  // mit Abstand INNERHALB der Füllkanten (left-3/right-3, wie dort right-3),
-  // unsichtbare breitere Trefferfläche via before-Pseudo.
+  // Exakt dieselbe Geometrie wie der Einstellungs-Slider: Track mit p-1,
+  // Ticks auf dem Track, Füll-„Schuh“ UND Griffe in der inneren Content-Box
+  // (damit Prozentwerte identisch auflösen), Griff-Balken mit 12 px Abstand
+  // innerhalb der Füllkanten.
   const thumb = "absolute top-1/2 z-10 h-5 w-1 -translate-y-1/2 cursor-ew-resize rounded-full bg-[#242424] before:absolute before:-inset-x-2.5 before:-inset-y-2"
   return (
-    <div ref={trackRef} className="relative h-12 overflow-hidden rounded-[10px] border border-white/10 bg-[#242424] p-1">
+    <div className="relative h-12 overflow-hidden rounded-[10px] border border-white/10 bg-[#242424] p-1">
       <div className="pointer-events-none absolute inset-y-3 left-4 right-4 opacity-70" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(255,255,255,.055) 0 4px, transparent 4px 14px)" }} />
-      <div className="pointer-events-none absolute inset-y-1 rounded-lg bg-[#171717]" style={{ left: `${min}%`, width: `${Math.max(max - min, 0)}%` }} />
-      <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `calc(${min}% + 12px)` }} />
-      <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `calc(${max}% - 16px)` }} />
+      <div ref={trackRef} className="relative h-full">
+        <div className="pointer-events-none absolute inset-y-0 rounded-lg bg-[#171717]" style={{ left: `${min}%`, width: `${Math.max(max - min, 0)}%` }} />
+        <span role="slider" aria-label="Score von" aria-valuenow={min} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("min")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(Math.max(0, min - 1), max); if (event.key === "ArrowRight") onChange(Math.min(max, min + 1), max) }} className={thumb} style={{ left: `calc(${min}% + 12px)` }} />
+        <span role="slider" aria-label="Score bis" aria-valuenow={max} aria-valuemin={0} aria-valuemax={100} tabIndex={0} onPointerDown={() => setDragging("max")} onKeyDown={(event) => { if (event.key === "ArrowLeft") onChange(min, Math.max(min, max - 1)); if (event.key === "ArrowRight") onChange(min, Math.min(100, max + 1)) }} className={thumb} style={{ left: `calc(${max}% - 16px)` }} />
+      </div>
     </div>
   )
 }
@@ -758,7 +763,7 @@ function ScoreRangeDialog({ open, onOpenChange, initial, onApply }: { open: bool
       <div className="py-2">
         <div className="mb-3 flex items-baseline justify-between"><span className="text-sm text-[#ccc]">Score von/bis</span><span className="font-mono text-sm text-white tabular-nums">{draft.min}–{draft.max} %</span></div>
         <DualRangeSlider min={draft.min} max={draft.max} onChange={(min, max) => setDraft({ min, max })} />
-        <div className="mt-2 flex justify-between font-mono text-xs text-[#888] tabular-nums"><span>{draft.min} %</span><span>{draft.max} %</span></div>
+        <div className="mt-2 flex justify-between font-mono text-xs text-[#888] tabular-nums"><span>0 %</span><span>100 %</span></div>
       </div>
       <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" className="mr-auto" onClick={() => setDraft({ min: 0, max: 100 })}>Zurücksetzen</Button><Button variant="ghost" onClick={() => onOpenChange(false)}>Abbrechen</Button><Button onClick={() => onApply(draft)}>Anwenden</Button></DialogFooter>
     </DialogContent>
@@ -1686,7 +1691,7 @@ function MailboxSettingsDialog({ account, open, onOpenChange, refresh, onAction 
       <div className="space-y-2">
         <Label>Bereich</Label>
         <Select value={rescanMode} onValueChange={(value) => { if (value) setRescanMode(value as "all" | "custom") }}>
-          <SelectTrigger className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm"><SelectValue>{(value) => (value === "all" ? "Alles" : "Benutzerdefiniert")}</SelectValue></SelectTrigger>
           <SelectContent><SelectItem value="all">Alles</SelectItem><SelectItem value="custom">Benutzerdefiniert</SelectItem></SelectContent>
         </Select>
       </div>
