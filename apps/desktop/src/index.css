@@ -234,6 +234,22 @@ input[type="password"]::-ms-clear {
   animation: toast-enter 180ms ease-out both;
 }
 
+/* Production-Build: sichtbare Textauswahl verhindern (Demo-/Browser-Vorschau
+   bleibt selektierbar). Eingabefelder, Textareas und Code bleiben selektierbar. */
+.app-no-select,
+.app-no-select * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-no-select input,
+.app-no-select textarea,
+.app-no-select code,
+.app-no-select [role="textbox"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast-enter,
   .floating-action-enter,

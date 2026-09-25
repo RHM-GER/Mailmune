@@ -418,7 +418,7 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      <div className="relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white">
+      <div className={`relative flex h-screen min-h-[620px] overflow-hidden bg-[#171717] text-white ${import.meta.env.PROD && isTauri() ? "app-no-select" : ""}`}>
         <WindowControls />
         <Sidebar page={page} onPage={setPage} compact={effectiveCompactNav} compactLocked={narrowApp} onCompact={() => setCompactNav((value) => !value)} pending={summary.pending} accounts={accounts} activeAccountId={activeId} onSelectAccount={setActiveAccountId} refresh={refresh} notificationDot={hasOpenNotifications} />
         <main className="relative min-w-0 flex-1 overflow-hidden [transform:translateZ(0)]">
@@ -1453,7 +1453,7 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
       <div data-section-id="settings-model"><ConnectionSection title="KI-Modelle" tooltip="Lokale KI-Modelle werden über Ollama verbunden. Sie bleiben auf diesem Gerät und können nach einem Fähigkeitstest für unklare E-Mails eingesetzt werden." count={accounts.filter((item) => item.ollamaValidated).length} add={<span />}>
         <ModelManager accounts={activeAccount ? [activeAccount] : []} refresh={refresh} />
       </ConnectionSection></div>
-      <div data-section-id="settings-security" className="flex gap-3 border-t border-white/[0.09] pt-6"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#999]" /><div><p className="text-sm font-medium">Sicherheit</p><p className="mt-1 text-xs leading-5 text-[#777]">Passwörter liegen im Betriebssystem-Schlüsselbund. Nachrichtentexte werden nicht dauerhaft gespeichert.</p></div></div>
+      <div data-section-id="settings-security" className="border-t border-white/[0.09] pt-6"><div><p className="text-sm font-medium">Sicherheit</p><p className="mt-1 text-xs leading-5 text-[#777]">Passwörter liegen im Betriebssystem-Schlüsselbund. Nachrichtentexte werden nicht dauerhaft gespeichert.</p></div></div>
     </section>
     </div></div>
     <ScrollFade strength={settingsFade} targetRef={settingsScrollRef} />
@@ -2040,7 +2040,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   }
 
   const validated = account.ollamaValidated && account.ollamaModel === selected
-  const aiOk = reachable === true && Boolean(account.ollamaModel) && installed.includes(account.ollamaModel ?? "")
+  // „Verbunden/aktiv“ gilt erst, wenn der Fähigkeitstest BESTANDEN hat –
+  // Ollama-Erreichbarkeit + installiertes Modell allein sind keine Einsatzbereitschaft.
+  const aiOk = reachable === true && Boolean(account.ollamaModel) && installed.includes(account.ollamaModel ?? "") && account.ollamaValidated
   // Auswahl = nur lokal installierte Modelle; Empfehlungen leben außerhalb
   // der Liste im eigenen Dialog.
   const options = installed.map((tag) => ({ tag, label: tag }))
@@ -2054,7 +2056,7 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <div className="min-w-0 flex-1">
         <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
           <span className="truncate">{account.ollamaModel || selected || "Kein Modell gewählt"}</span>
-          <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} />
+          <AiStatusIcon ok={aiOk} enabled={account.aiEnabled} okText="Verbunden – validiertes Modell aktiv und einsatzbereit" badText={reachable === false ? "Nicht verbunden – Ollama läuft nicht oder ist nicht erreichbar" : account.ollamaValidated ? "Nicht verbunden – das validierte Modell ist nicht lokal installiert" : "Ollama läuft, aber das Modell ist nicht validiert – Fähigkeitstest ausführen"} />
           <InfoTooltip><p>Ein KI-Ergebnis allein verschiebt niemals eine Mail. Das Modell zählt als eine Signalgruppe neben Regeln und Lernfilter und läuft nur lokal.</p></InfoTooltip>
         </p>
         <p className="mt-1 truncate text-xs text-[#666]">{subtitle}</p>
