@@ -559,7 +559,7 @@ function ScanToast({ notice }: { notice: { run: ScanEvent["run"]; candidates?: n
       ? `${notice.run.processed} Nachrichten geprüft · ${notice.candidates ?? 0} Verdachtsfälle · nichts verschoben`
       : notice.run.error || "Der Lauf wurde nicht abgeschlossen."
     : (notice.folderMessages ?? 0) > 0 || notice.run.estimatedTotal > 0
-      ? `${notice.run.processed} von ${notice.run.estimatedTotal || notice.folderMessages} Nachrichten gelesen${(notice.folderMessages ?? 0) > notice.run.estimatedTotal ? ` (Ordner enthält insgesamt ${notice.folderMessages})` : ""}${eta ? ` · verbleibend ~${eta}` : ""}`
+      ? `${notice.run.processed} von ${notice.run.estimatedTotal || notice.folderMessages} Nachrichten gelesen${eta ? ` · verbleibend ~${eta}` : ""}`
       : `${notice.run.processed} Nachrichten gelesen`
   if (collapsed) {
     return <div className="pointer-events-none fixed bottom-6 right-6 z-50">
