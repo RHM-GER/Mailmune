@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
-import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getEmbeddingStatus, getProfileModel, isTauri, listenAgentEvents, models as listModels, recommendedModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
-import type { Account, AgentEvent, DailyStat, Decision, EmbeddingStatus, LearningBaseline, ProfileModel, RecommendedModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
+import { agentRequest, cancelScan, compileProfile, deleteAccount, demoDecisions, demoSummary, emptySummary, ensureOllamaRunning, exportTransfer, getBaseline, getEmbeddingStatus, getProfileModel, isTauri, listenAgentEvents, models as listModels, resetLearning, setAccountModel, setProfileModelEnabled, startScan, stats as fetchStats, validateAccountModel } from "@/lib/api"
+import type { Account, AgentEvent, DailyStat, Decision, EmbeddingStatus, LearningBaseline, ProfileModel, SafetyMode, ScanEvent, Summary } from "@/lib/api"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification"
 
@@ -1872,7 +1872,6 @@ function AiStatusIcon({ ok, enabled, okText = "Verbunden – die KI ist aktiv un
 function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () => void }) {
   const account = accounts[0]
   const [installed, setInstalled] = useState<string[]>([])
-  const [recommended, setRecommended] = useState<RecommendedModel[]>([])
   const [selected, setSelected] = useState<string>(account?.ollamaModel ?? "")
   const [busy, setBusy] = useState(false)
   // Modellwechsel-Warnung: ersetzt ein bereits validiertes, genutztes Modell,
@@ -1886,12 +1885,13 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
   const [toggling, setToggling] = useState(false)
   const [baseline, setBaseline] = useState<LearningBaseline | null>(null)
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null)
+  const [recsOpen, setRecsOpen] = useState(false)
 
   const loadModels = async () => {
     try {
-      const [inst, rec] = await Promise.all([listModels(), recommendedModels()])
+      const [inst, base] = await Promise.all([listModels(), getBaseline().catch(() => ({ baseline: null }))])
       setInstalled(inst ?? [])
-      setRecommended(rec.models ?? [])
+      setBaseline(base.baseline ?? null)
       setReachable(true)
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error")
@@ -1904,10 +1904,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
     let cancelled = false
     void (async () => {
       try {
-        const [inst, rec, base] = await Promise.all([listModels(), recommendedModels(), getBaseline().catch(() => ({ baseline: null }))])
+        const [inst, base] = await Promise.all([listModels(), getBaseline().catch(() => ({ baseline: null }))])
         if (cancelled) return
         setInstalled(inst ?? [])
-        setRecommended(rec.models ?? [])
         setBaseline(base.baseline ?? null)
         setReachable(true)
         if (account?.id) {
@@ -1930,16 +1929,11 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
 
   useEffect(() => {
     if (selected) return
-    // Prefer a model that is actually installed so the capability test can
-    // succeed without a separate pull step; only fall back to a recommendation
-    // (shown with an install hint) when nothing is installed yet.
-    const fallback = recommended.find((model) => model.default && installed.includes(model.tag))?.tag
-      ?? recommended.find((model) => installed.includes(model.tag))?.tag
-      ?? installed[0]
-      ?? recommended.find((model) => model.default)?.tag
-      ?? recommended[0]?.tag
+    // Nur noch lokal installierte Modelle anbieten – Empfehlungen leben
+    // außerhalb der Auswahlliste im eigenen Dialog.
+    const fallback = installed[0]
     if (fallback) setSelected(fallback)
-  }, [recommended, installed, selected])
+  }, [installed, selected])
 
   if (!account) {
     return <EmptyConnectionCard text="Zuerst ein Postfach verbinden; das KI-Modell wird pro Postfach aktiviert." />
@@ -2047,23 +2041,9 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
 
   const validated = account.ollamaValidated && account.ollamaModel === selected
   const aiOk = reachable === true && Boolean(account.ollamaModel) && installed.includes(account.ollamaModel ?? "")
-  // Merge recommended + installed into one de-duplicated option list. A
-  // recommended model that is not installed yet is flagged so the UI can show
-  // the install command instead of failing later with a bare 404.
-  const options: Array<{ tag: string; label: string; detail: string; recommended: boolean; installed: boolean }> = []
-  const seen = new Set<string>()
-  for (const model of recommended) {
-    if (seen.has(model.tag)) continue
-    seen.add(model.tag)
-    const isInstalled = installed.includes(model.tag)
-    options.push({ tag: model.tag, label: model.label, detail: `${model.sizeClass} · empfohlen: ${model.rationale}${isInstalled ? " · lokal installiert" : ""}`, recommended: true, installed: isInstalled })
-  }
-  for (const tag of installed) {
-    if (seen.has(tag)) continue
-    seen.add(tag)
-    options.push({ tag, label: tag, detail: "lokal installiert", recommended: false, installed: true })
-  }
-  const selectedOption = options.find((option) => option.tag === selected)
+  // Auswahl = nur lokal installierte Modelle; Empfehlungen leben außerhalb
+  // der Liste im eigenen Dialog.
+  const options = installed.map((tag) => ({ tag, label: tag }))
   const subtitle = !account.aiEnabled
     ? "KI ausgeschaltet – es prüfen nur Regeln und Lernfilter"
     : validated ? "Ollama · lokal" : account.ollamaModel ? "Ollama · gewählt, nicht validiert" : "Ollama · kein Modell gewählt"
@@ -2091,19 +2071,18 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
       <DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[520px]">
         <DialogHeader><DialogTitle>KI-Modell</DialogTitle><DialogDescription>Modell wählen, Installation prüfen und den Fähigkeitstest für {account.name} ausführen.</DialogDescription></DialogHeader>
         <div className="space-y-3 py-2">
-          <Label htmlFor="model-select">Modell wählen</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="model-select">Modell wählen <span className="font-normal text-[#666]">(Empfehlungen)</span></Label>
+            <button type="button" aria-label="Empfehlungen anzeigen" onClick={() => setRecsOpen(true)} className="flex size-6 items-center justify-center rounded-md border border-white/10 bg-white/[0.05] text-[#a8a8a8] transition-colors hover:bg-white/[0.08] hover:text-white"><Plus className="size-3.5" /></button>
+          </div>
           <Select value={selected} onValueChange={(value) => { if (value) choose(value) }} disabled={busy}>
             <SelectTrigger id="model-select" className="h-12 w-full rounded-[10px] border-white/10 bg-[#242424] px-3.5 text-sm">
-              <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle gefunden"} />
+              <SelectValue placeholder={options.length > 0 ? "Modell wählen" : "Keine Modelle installiert"} />
             </SelectTrigger>
             <SelectContent>
-              {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}{option.recommended ? " (empfohlen)" : ""}{!option.installed ? " – nicht installiert" : ""}</SelectItem>)}
+              {options.map((option) => <SelectItem key={option.tag} value={option.tag}>{option.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          {selectedOption && <div className="text-xs leading-5 text-[#666]"><p>{selectedOption.detail}</p>{!selectedOption.installed && <p className="mt-1.5 rounded-lg border border-[#e0a86c]/30 bg-[#e0a86c]/[0.07] p-2.5 leading-5 text-[#e0a86c]">Dieses Modell ist noch nicht installiert. In einem Terminal ausführen: <code className="select-all font-mono text-white">ollama pull {selected}</code> – danach hier erneut den Fähigkeitstest starten.</p>}</div>}
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant={validated ? "ghost" : "default"} onClick={() => void validate()} disabled={busy || !selected}>{busy ? "Bitte warten …" : validated ? "Erneut validieren" : "Fähigkeitstest"}</Button>
-          </div>
           <div className="space-y-2 border-t border-white/[0.07] pt-3">
             <div className="flex items-center gap-2"><Label>Embedding-Modell (Fast-Pfad)</Label><InfoTooltip><p>Embedding-Modelle (z. B. qwen3-embedding:0.6b) erzeugen Vektoren statt Text: Jede Mail wird gegen importierte Spam-/Ham-Zentroide verglichen – eine eigene Signalgruppe, schnell und ohne Generierung. Die Zentroide werden einmalig per mltool embed aus einem lokalen Korpus importiert.</p></InfoTooltip></div>
             <Select value={account.embeddingModel || "none"} onValueChange={(value) => { if (value) void applyEmbeddingModel(value === "none" ? "" : value) }} disabled={busy}>
@@ -2132,7 +2111,36 @@ function ModelManager({ accounts, refresh }: { accounts: Account[]; refresh: () 
         <DialogFooter className="border-t border-white/[0.09] pt-4"><Button variant="ghost" onClick={() => setPendingTag(null)}>Abbrechen</Button><Button onClick={() => { const tag = pendingTag; setPendingTag(null); if (tag) void applyModel(tag) }}>Modell wechseln</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <RecommendationsDialog open={recsOpen} onOpenChange={setRecsOpen} />
   </div>
+}
+
+// Modell-Empfehlungen (Research-Stand 2026-09-25): bewusst NICHT in der
+// Auswahlliste, sondern als eigener Dialog mit Begründungen – die Liste zeigt
+// nur, was lokal installiert ist.
+const modelRecommendationsStand = "25.09.2026"
+const modelRecommendations = [
+  { name: "Qwen3.5 2B", specs: "2,7 GB · 256K Kontext · Deutsch sehr gut", verdict: "Beste Gesamtwahl", why: "Für die Spam-Klassifikation aktuell der beste Kompromiss aus Qualität, Größe, Deutsch-Support und Ollama-Kompatibilität." },
+  { name: "Gemma 3 1B", specs: "815 MB · 32K Kontext · Deutsch gut", verdict: "Für schwache PCs", why: "Die beste sehr leichte Alternative; läuft mit deutlich weniger Ressourcen." },
+  { name: "Granite 4 1B-H", specs: "1,6 GB · 1M Kontext · Deutsch explizit", verdict: "Sehr interessant", why: "IBM-Modell mit expliziter Unterstützung für Klassifikation und Deutsch." },
+  { name: "Qwen3.5 0.8B", specs: "1,0 GB · 256K Kontext · Deutsch gut", verdict: "Überraschend schwach", why: "Fällt in mehreren Benchmarks deutlich ab und nutzt sein großes Kontextfenster nicht zuverlässig." },
+]
+
+function RecommendationsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const [openItem, setOpenItem] = useState<string | null>(null)
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="border-white/[0.08] bg-[#1d1d1d] sm:max-w-[480px]"><DialogHeader><div className="flex items-center gap-2"><DialogTitle>Empfehlungen</DialogTitle><InfoTooltip><p>Stand der Einschätzung: {modelRecommendationsStand} · verglichen nach Qualität, Größe, Deutsch-Support und Ollama-Kompatibilität für Spam-Klassifikation.</p></InfoTooltip></div></DialogHeader>
+    <div className="divide-y divide-white/[0.07]">
+      {modelRecommendations.map((item) => <div key={item.name} className="py-2">
+        <button type="button" onClick={() => setOpenItem((current) => (current === item.name ? null : item.name))} aria-expanded={openItem === item.name} className="flex w-full items-center justify-between gap-2 py-1 text-left outline-none focus-visible:text-white">
+          <span className="min-w-0"><span className="block truncate text-sm text-[#ddd]">{item.name}</span><span className="block truncate text-[11px] text-[#666]">{item.specs} · {item.verdict}</span></span>
+          <ChevronDown className={`size-4 shrink-0 text-[#777] transition-transform ${openItem === item.name ? "rotate-180" : ""}`} />
+        </button>
+        {openItem === item.name && <p className="pb-2 text-xs leading-5 text-[#888]">{item.why}</p>}
+      </div>)}
+    </div>
+    <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Schließen</Button></DialogFooter>
+  </DialogContent></Dialog>
 }
 
 function AddAccount({ refresh, onCreated, open: controlledOpen, onOpenChange, hideTrigger }: { refresh: () => void; onCreated?: (id: string) => void; open?: boolean; onOpenChange: (open: boolean) => void; hideTrigger?: boolean }) {
