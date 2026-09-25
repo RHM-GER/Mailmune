@@ -88,8 +88,8 @@ const notifications: NotificationItem[] = [
 
 // Echte Benachrichtigungen aus dem Agent-Eventstream. Zeitstempel werden erst
 // beim Rendern formatiert, damit „Heute/Gestern“ über Neustarts korrekt bleibt.
-type AgentNotification = { id: string; kind: NotificationKind; title: string; detail: string; time: number; action: boolean }
-type NotificationItem = { id: string; kind: NotificationKind; title: string; detail: string; time: string; action: boolean }
+type AgentNotification = { id: string; kind: NotificationKind; title: string; detail: string; time: number; action: boolean; account?: string }
+type NotificationItem = { id: string; kind: NotificationKind; title: string; detail: string; time: string; action: boolean; account?: string }
 
 // OS-Push für wichtige Agent-Ereignisse. Während das Fenster im Fokus ist,
 // erscheint kein Push (die Meldung ist bereits sichtbar). Die Berechtigung
@@ -244,7 +244,20 @@ export default function App() {
     // Reine Scan-Informationen ohne Handlungsbedarf bleiben In-App;
     // alles Wichtige (Verdachtsfälle, Fehler, Wochenprüfung, Modell)
     // geht zusätzlich als OS-Push raus.
-    if (item.action || item.kind !== "scan") void sendOsNotification(item.title, item.detail)
+    if (item.action || item.kind !== "scan") {
+      const label = item.account ? accountsRef.current.find((entry) => entry.id === item.account)?.name ?? item.account : undefined
+      void sendOsNotification(label ? `${item.title} · ${label}` : item.title, item.detail)
+    }
+  }
+  // Herkunft von Event-Toasts/-Benachrichtigungen: Account-ID, wenn sie NICHT
+  // dem gerade aktiven Profil entspricht – sonst wäre die Pill nur Rauschen.
+  const accountsRef = useRef<Account[]>([])
+  useEffect(() => { accountsRef.current = accounts }, [accounts])
+  const originAccount = (id?: string) => (id && id !== activeAccountRef.current ? id : undefined)
+  const originLabel = (id?: string) => {
+    const origin = originAccount(id)
+    if (!origin) return undefined
+    return accountsRef.current.find((item) => item.id === origin)?.name ?? origin
   }
   // Das Archiv liegt in der App, damit der Nav-Punkt verschwindet, sobald
   // alle Benachrichtigungen archiviert sind.
@@ -311,34 +324,35 @@ export default function App() {
           // tatsächlich etwas als Verdachtsfall markiert wurde (oder ein Lauf
           // fehlschlägt) entsteht ein Eintrag.
           if ((data.candidates ?? 0) > 0) {
-            pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: true })
+            pushNotification({ id: `scan-${data.run.id}`, kind: "scan", title: "Prüfung abgeschlossen", detail: `${data.candidates ?? 0} Verdachtsfälle · ${data.run.processed} Nachrichten geprüft · nichts gelöscht`, time: Date.now(), action: true, account: originAccount(data.run.accountId) })
           }
         } else if (data.run.status === "failed") {
-          pushNotification({ id: `scan-${data.run.id}`, kind: "error", title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false })
+          pushNotification({ id: `scan-${data.run.id}`, kind: "error", title: "Prüfung fehlgeschlagen", detail: data.run.error || "Der Lauf wurde nicht abgeschlossen.", time: Date.now(), action: false, account: originAccount(data.run.accountId) })
         }
       } else if (event.type === "schedule.deep_scan") {
-        pushNotification({ id: `deep-${Date.now()}`, kind: "schedule", title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false })
+        const data = event.data as { accountId?: string }
+        pushNotification({ id: `deep-${Date.now()}`, kind: "schedule", title: "Wochenprüfung gestartet", detail: "Alle Mails seit der letzten Wochenprüfung werden erneut mit KI geprüft.", time: Date.now(), action: false, account: originAccount(data.accountId) })
       } else if (event.type === "schedule.error") {
         const data = event.data as { accountId?: string; error?: string }
-        pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, kind: "error", title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false })
+        pushNotification({ id: `schedule-error-${data.accountId ?? "unknown"}`, kind: "error", title: "Geplante Prüfung fehlgeschlagen", detail: data.error || "Der Agent konnte das Postfach nicht erreichen.", time: Date.now(), action: false, account: originAccount(data.accountId) })
       } else if (event.type === "model.unavailable") {
         // KI konfiguriert, aber Ollama antwortet nicht: sichtbare Warnung,
         // dass ohne laufenden Ollama-Dienst keine KI-Filterung stattfindet.
         // Die ID pro Konto ersetzt frühere Warnungen statt sie zu stapeln.
         const data = event.data as { accountId?: string; model?: string; error?: string }
-        pushNotification({ id: `model-unavailable-${data.accountId ?? "unknown"}`, kind: "model", title: "KI-Filterung ausgefallen – Ollama starten", detail: `Das lokale Modell (${data.model ?? "unbekannt"}) ist nicht erreichbar: ${data.error || "Ollama läuft nicht"}. Bitte Ollama starten, sonst prüft nur der Regelfilter.`, time: Date.now(), action: false })
+        pushNotification({ id: `model-unavailable-${data.accountId ?? "unknown"}`, kind: "model", title: "KI-Filterung ausgefallen – Ollama starten", detail: `Das lokale Modell (${data.model ?? "unbekannt"}) ist nicht erreichbar: ${data.error || "Ollama läuft nicht"}. Bitte Ollama starten, sonst prüft nur der Regelfilter.`, time: Date.now(), action: false, account: originAccount(data.accountId) })
       } else if (event.type === "model.error") {
         // Einzelfehler der KI (Timeout, Kontextlänge, Modell-404 …): echte
         // Ursache zeigen, NICHT behaupten, Ollama liefe nicht.
         const data = event.data as { accountId?: string; model?: string; error?: string; summary?: string }
-        pushNotification({ id: `model-error-${data.accountId ?? "unknown"}`, kind: "error", title: "KI-Prüfung teilweise fehlgeschlagen", detail: `${data.summary ?? "Einzelne KI-Consults sind fehlgeschlagen"} (${data.model ?? "Modell"}): ${data.error ?? "unbekannter Fehler"}`, time: Date.now(), action: false })
+        pushNotification({ id: `model-error-${data.accountId ?? "unknown"}`, kind: "error", title: "KI-Prüfung teilweise fehlgeschlagen", detail: `${data.summary ?? "Einzelne KI-Consults sind fehlgeschlagen"} (${data.model ?? "Modell"}): ${data.error ?? "unbekannter Fehler"}`, time: Date.now(), action: false, account: originAccount(data.accountId) })
       } else if (event.type === "profile.compiled") {
         // Automatische oder manuelle Rekompilierung des Profilmodells melden,
         // damit klar ist, ab wann Indikatoren/Prompt frisch sind.
-        const data = event.data as { reason?: string }
+        const data = event.data as { reason?: string; accountId?: string }
         showToast(data.reason === "auto"
           ? "KI-Profil automatisch neu kompiliert – dein geänderter Profiltext wirkt jetzt."
-          : "KI-Profil neu kompiliert.")
+          : "KI-Profil neu kompiliert.", "info", originLabel(data.accountId))
         void refresh()
       }
       void refresh()
@@ -417,7 +431,7 @@ export default function App() {
           <div className={`mx-auto w-full max-w-[1500px] px-14 max-[639px]:px-7 ${page === "review" ? "h-screen overflow-hidden pb-0 pt-12" : page === "notifications" ? "pb-10 pt-12" : page === "settings" ? "h-[calc(100vh-100px)] overflow-hidden pb-0 pt-12" : "pb-10 pt-12"}`}>
             {page === "dashboard" && <Dashboard summary={summary} onReview={() => setPage("review")} scrollRef={mainScrollRef} agentOnline={agentOnline} dailyStats={dailyStats} notifications={notificationItems.slice(0, 3)} onNotifications={() => setPage("notifications")} />}
             {page === "review" && <ReviewPage decisions={decisions} refresh={refresh} agentOnline={agentOnline} onCheckMail={() => { const id = activeAccountRef.current; if (id) void startScan(id, false).catch(() => {}) }} />}
-            {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={notificationItems} archive={notificationArchive} onArchiveChange={setNotificationArchive} onReview={isTauri() ? () => setPage("review") : undefined} />}
+            {page === "notifications" && <Notifications scrollRef={mainScrollRef} items={notificationItems} archive={notificationArchive} onArchiveChange={setNotificationArchive} onReview={isTauri() ? () => setPage("review") : undefined} activeAccountId={activeId} accountName={(id) => accounts.find((item) => item.id === id)?.name ?? id} />}
             {page === "settings" && <SettingsPage accounts={accounts} refresh={refresh} activeAccountId={activeId} />}
           </div>
           </div>
@@ -445,11 +459,11 @@ function formatDuration(ms: number): string {
 // Minimales Toast-System: Fehler- und Statusmeldungen gehören als Toast
 // angezeigt, nicht als loser Text unter irgendwelchen Karten. showToast ist
 // modulweit verfügbar; der ToastHost hängt einmal im App-Root.
-type ToastItem = { id: number; text: string; tone: "error" | "info" }
+type ToastItem = { id: number; text: string; tone: "error" | "info"; account?: string }
 let toastListeners: Array<(toast: ToastItem) => void> = []
 let toastCounter = 0
-function showToast(text: string, tone: "error" | "info" = "info") {
-  const toast = { id: ++toastCounter, text, tone }
+function showToast(text: string, tone: "error" | "info" = "info", account?: string) {
+  const toast = { id: ++toastCounter, text, tone, account }
   for (const listener of toastListeners) listener(toast)
 }
 
@@ -465,7 +479,10 @@ function ToastHost() {
   }, [])
   if (items.length === 0) return null
   return <div className="pointer-events-none fixed bottom-6 right-6 z-[70] flex w-[380px] max-w-[calc(100vw-3rem)] flex-col gap-2">
-    {items.map((toast) => <div key={toast.id} role="status" className={`toast-enter pointer-events-auto rounded-md border px-3.5 py-3 text-xs leading-5 shadow-[0_20px_40px_rgba(0,0,0,.5)] ${toast.tone === "error" ? "border-[#e07a5f]/30 bg-[#2a201d] text-[#e8b4a4]" : "border-white/10 bg-[#242424] text-[#bbb]"}`}>{toast.text}</div>)}
+    {items.map((toast) => <div key={toast.id} role="status" className={`toast-enter pointer-events-auto rounded-md border px-3.5 py-3 text-xs leading-5 shadow-[0_20px_40px_rgba(0,0,0,.5)] ${toast.tone === "error" ? "border-[#e07a5f]/30 bg-[#2a201d] text-[#e8b4a4]" : "border-white/10 bg-[#242424] text-[#bbb]"}`}>
+      {toast.account && <span className="mb-1 inline-flex rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] text-[#aaa]">{toast.account}</span>}
+      {toast.text}
+    </div>)}
   </div>
 }
 
@@ -1123,7 +1140,7 @@ function readStoredSort(view: string): { key: SortKey; direction: SortDirection 
 
 function StatusBadge({ status }: { status: Decision["status"] }) { const labels = { pending: "Review", moved: "Review", confirmed: "Bestätigt", rejected: "Fehlalarm", deferred: "Später" }; return <Badge variant="outline" className="border-white/10 bg-white/[0.025] text-[#aaa]">{labels[status]}</Badge> }
 
-function Notifications({ scrollRef, items = notifications, archive, onArchiveChange, onReview }: { scrollRef: React.RefObject<HTMLElement | null>; items?: NotificationItem[]; archive: Record<string, number>; onArchiveChange: (archive: Record<string, number>) => void; onReview?: () => void }) {
+function Notifications({ scrollRef, items = notifications, archive, onArchiveChange, onReview, activeAccountId, accountName }: { scrollRef: React.RefObject<HTMLElement | null>; items?: NotificationItem[]; archive: Record<string, number>; onArchiveChange: (archive: Record<string, number>) => void; onReview?: () => void; activeAccountId?: string | null; accountName?: (id: string) => string }) {
   const [view, setView] = useState<"open" | "archived">("open")
   const [query, setQuery] = useState("")
   const [kind, setKind] = useState<NotificationKind | "all">("all")
@@ -1161,7 +1178,7 @@ function Notifications({ scrollRef, items = notifications, archive, onArchiveCha
     </div>
     <div className="border-b border-white/[0.09]">{visible.map((item) => { const isSelected = selected.includes(item.id); return <div key={item.id} data-section-id={`notification-${item.id}`} className={`flex items-center gap-4 border-b border-white/[0.09] py-5 last:border-b-0 ${isSelected ? "bg-white/[0.03]" : ""}`}>
       <Checkbox checked={isSelected} onCheckedChange={(checked) => setSelected((current) => checked ? [...current, item.id] : current.filter((id) => id !== item.id))} aria-label={`${item.title} auswählen`} />
-      <div className="min-w-0 flex-1"><p className="flex items-center gap-2 text-sm font-medium"><span className="truncate">{item.title}</span>{item.action && <span className="size-1.5 shrink-0 rounded-full bg-[#ff6b2c]" />}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>
+      <div className="min-w-0 flex-1"><p className="flex items-center gap-2 text-sm font-medium"><span className="truncate">{item.title}</span>{item.action && <span className="size-1.5 shrink-0 rounded-full bg-[#ff6b2c]" />}{item.account && item.account !== activeAccountId && <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[10px] font-normal text-[#aaa]">{accountName ? accountName(item.account) : item.account}</span>}</p><p className="mt-1 text-xs leading-5 text-[#777]">{item.detail}</p><p className="mt-2 text-[11px] text-[#555]">{item.time}</p></div>
       {item.action && view === "open" && <Button size="sm" variant="outline" onClick={onReview}>Prüfen</Button>}
       <button className="flex size-9 shrink-0 items-center justify-center rounded-md text-[#777] transition-colors hover:bg-white/[0.05] hover:text-white" aria-label={view === "open" ? "Benachrichtigung archivieren" : "Benachrichtigung wiederherstellen"} onClick={() => { const next = { ...archive }; if (view === "open") next[item.id] = Date.now(); else delete next[item.id]; onArchiveChange(next) }}>{view === "open" ? <X className="size-4" /> : <ArchiveRestore className="size-4" />}</button>
     </div> })}{visible.length === 0 && <p className="py-12 text-center text-sm text-[#666]">{view === "open" ? "Keine offenen Benachrichtigungen." : "Keine archivierten Benachrichtigungen."}</p>}</div>
@@ -1261,20 +1278,22 @@ function SettingsPage({ accounts, refresh, activeAccountId }: { accounts: Accoun
     setFolderName(activeAccount.spamFolder ?? "AI_SPAM_FILTER")
   }, [activeAccount?.id, activeAccount?.safetyMode, activeAccount?.spamFolder])
   const runAccountAction = async (account: Account, action: "test" | "scan" | "resync") => {
+    // Pill nur, wenn die Aktion ein anderes als das aktive Profil betrifft.
+    const label = account.id !== activeAccountId ? account.name : undefined
     try {
       if (action === "test") {
-        showToast("Verbindung wird geprüft …")
+        showToast("Verbindung wird geprüft …", "info", label)
         const result = await agentRequest<{ supportsIdle: boolean; supportsMove: boolean; folders: string[] }>("POST", `/v1/accounts/${account.id}/test`)
-        showToast(`Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}`)
+        showToast(`Verbunden · IDLE ${result.supportsIdle ? "verfügbar" : "nicht verfügbar"} · MOVE ${result.supportsMove ? "verfügbar" : "nicht verfügbar"}`, "info", label)
       } else {
-        showToast(action === "resync" ? "Postfach wird komplett neu geprüft …" : "Prüfung wird gestartet …")
+        showToast(action === "resync" ? "Postfach wird komplett neu geprüft …" : "Prüfung wird gestartet …", "info", label)
         await startScan(account.id, action === "resync")
         // Live-Fortschritt kommt über den Eventstream im globalen ScanToast;
         // hier nur die Daten einmal nachziehen.
         await refresh()
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), "error")
+      showToast(error instanceof Error ? error.message : String(error), "error", label)
     }
   }
   const persistSafetyMode = async (nextMode: SafetyMode) => {
