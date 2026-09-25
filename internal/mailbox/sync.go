@@ -124,8 +124,12 @@ func (m *Client) syncFolder(ctx context.Context, account domain.AccountConfig, p
 		if maxMessages <= 0 || maxMessages > DefaultMaxMessages {
 			maxMessages = DefaultMaxMessages
 		}
+		// Datumsbegrenzte Läufe (Tiefscan, benutzerdefinierter Bereich) müssen
+		// das GESAMTE Fenster lesen: die Kappung auf die neuesten N würde alte
+		// Mails sonst still überspringen. Unbegrenzte Erstläufe bleiben bei den
+		// neuesten N, alles weitere wächst inkrementell.
 		start := uint32(1)
-		if selected.NumMessages > uint32(maxMessages) {
+		if opts.Since.IsZero() && selected.NumMessages > uint32(maxMessages) {
 			start = selected.NumMessages - uint32(maxMessages) + 1
 		}
 		var set imap.SeqSet
